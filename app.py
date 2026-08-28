@@ -77,7 +77,9 @@ st.markdown(
     "- **Rotation & Congestion** — fixture pile-ups, AFCON, European midweeks.\n"
     "- **Squad Briefing** — one batched AI request for the whole squad.\n"
     "- **Squad Intelligence** — predicted XI, key-player impact, injury knock-on, "
-    "comebacks and new signings, learned from gameweek history."
+    "comebacks and new signings, learned from gameweek history.\n"
+    "- **Role Arbitrage** — players deployed further forward than FPL lists them, "
+    "and how long that window stays open."
 )
 
 st.info(

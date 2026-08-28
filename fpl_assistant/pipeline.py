@@ -51,9 +51,10 @@ def ingest_fpl(cfg: Config) -> int:
                     now_cost, selected_by_percent, form, points_per_game, total_points, status,
                     chance_of_playing_next_round, transfers_in_event, transfers_out_event,
                     news, news_added, region, known_name, minutes, starts,
-                    price_change_percent, scout_news_link, ep_next, team_join_date)
+                    price_change_percent, scout_news_link, ep_next, team_join_date,
+                    corners_order, freekicks_order, penalties_order)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     p["id"], p["web_name"], p["first_name"], p["second_name"], p["team"],
                     p["element_type"], POSITIONS.get(p["element_type"], "?"),
@@ -66,6 +67,8 @@ def ingest_fpl(cfg: Config) -> int:
                     p.get("minutes") or 0, p.get("starts") or 0,
                     _f(p.get("price_change_percent")), p.get("scout_news_link") or "",
                     _f(p.get("ep_next")), p.get("team_join_date"),
+                    p.get("corners_and_indirect_freekicks_order"),
+                    p.get("direct_freekicks_order"), p.get("penalties_order"),
                 ),
             )
 
@@ -232,9 +235,10 @@ def ingest_history(cfg: Config, upto_gw: int | None = None,
                         expected_goal_involvements, expected_goals_conceded,
                         defensive_contribution, tackles, recoveries,
                         clearances_blocks_interceptions, saves, bps, bonus,
-                        yellow_cards, red_cards, fixture_id, opponent_team, was_home)
+                        yellow_cards, red_cards, threat, creativity, influence,
+                        ict_index, fixture_id, opponent_team, was_home)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                               ?, ?, ?, ?, ?, ?)""",
+                               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         pid, gw, s.get("minutes") or 0, s.get("starts") or 0,
                         s.get("total_points") or 0, s.get("goals_scored") or 0,
@@ -247,6 +251,8 @@ def ingest_history(cfg: Config, upto_gw: int | None = None,
                         s.get("clearances_blocks_interceptions") or 0,
                         s.get("saves") or 0, s.get("bps") or 0, s.get("bonus") or 0,
                         s.get("yellow_cards") or 0, s.get("red_cards") or 0,
+                        _f(s.get("threat")), _f(s.get("creativity")),
+                        _f(s.get("influence")), _f(s.get("ict_index")),
                         fixture_id, opponent, was_home,
                     ),
                 )

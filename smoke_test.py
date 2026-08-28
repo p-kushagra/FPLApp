@@ -12,7 +12,8 @@ import traceback
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from fpl_assistant import analytics, congestion, search, squad_intel
+from fpl_assistant import analytics, congestion, role_arbitrage, search, squad_intel
+from fpl_assistant.freshness import manual_sources, refresh_prompt
 from fpl_assistant.insights import cache_stats, get_provider, summarise_cached
 from fpl_assistant.insights.claude_provider import build_squad_briefing
 from fpl_assistant.ui import boot
@@ -74,6 +75,18 @@ check("intel.sub_impact", lambda: squad_intel.sub_impact(conn, pid))
 check("intel.head_to_head", lambda: squad_intel.head_to_head(conn, pid, 1)["sample"])
 check("intel.new_signings", lambda: len(squad_intel.new_signings(conn)))
 check("intel.team_style", lambda: squad_intel.team_style(conn, cfg, tid)["team"])
+
+check("arb.position_baselines", lambda: len(role_arbitrage.position_baselines(conn)))
+check("arb.role_profile", lambda: role_arbitrage.role_profile(conn, pid)["role"])
+check("arb.points_premium",
+      lambda: role_arbitrage.points_premium(role_arbitrage.role_profile(conn, pid)))
+check("arb.window_risk",
+      lambda: role_arbitrage.window_risk(conn, role_arbitrage.role_profile(conn, pid))["verdict"])
+check("arb.candidates", lambda: len(role_arbitrage.arbitrage_candidates(conn, cfg)))
+check("arb.squad", lambda: len(role_arbitrage.squad_arbitrage(conn)))
+
+check("freshness.manual_sources", lambda: len(manual_sources(cfg)))
+check("freshness.refresh_prompt", lambda: len(refresh_prompt(cfg)))
 
 news = search.search_player_news(conn, pid, limit=5)
 provider = get_provider(cfg)

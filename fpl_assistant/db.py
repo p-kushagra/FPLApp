@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS player_gw (
   defensive_contribution REAL, tackles INTEGER, recoveries INTEGER,
   clearances_blocks_interceptions INTEGER, saves INTEGER, bps INTEGER,
   bonus INTEGER, yellow_cards INTEGER, red_cards INTEGER,
+  threat REAL, creativity REAL, influence REAL, ict_index REAL,
   fixture_id INTEGER, opponent_team INTEGER, was_home INTEGER,
   PRIMARY KEY (player_id, gw)
 );
@@ -118,6 +119,12 @@ _MIGRATIONS = {
         "starts": "INTEGER", "price_change_percent": "REAL",
         "scout_news_link": "TEXT", "ep_next": "REAL",
         "team_join_date": "TEXT",
+        "corners_order": "INTEGER", "freekicks_order": "INTEGER",
+        "penalties_order": "INTEGER",
+    },
+    "player_gw": {
+        "threat": "REAL", "creativity": "REAL", "influence": "REAL",
+        "ict_index": "REAL",
     },
     "teams": {
         "strength_attack_home": "INTEGER", "strength_attack_away": "INTEGER",
