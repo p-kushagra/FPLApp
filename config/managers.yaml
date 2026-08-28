@@ -41,7 +41,7 @@ teams:
 
   TOT:
     manager: Thomas Frank
-    style: Direct transitions, strong set-piece routines
+    style: Direct transitions, strong set-pieces, tactical flexibility
     rotation_hint: moderate
 
   MUN:
@@ -51,15 +51,20 @@ teams:
     notes: Wing-back role inflates defensive and attacking returns for those slots.
 
   NEW:
-    manager: Eddie Howe
-    style: Aggressive press, wide overloads
-    rotation_hint: settled
+    manager: Roberto De Zerbi
+    style: High possession, baiting presses, vertical traps
+    rotation_hint: moderate
 
   AVL:
     manager: Unai Emery
     style: Structured mid-block, high offside line
     rotation_hint: moderate
     notes: Emery rotates heavily in European weeks specifically.
+
+  BHA:
+    manager: Fabian Hürzeler
+    style: Patient build-up, baiting the press, fluid front line
+    rotation_hint: moderate
 
 # Global defaults applied when a club is not listed above.
 defaults:
