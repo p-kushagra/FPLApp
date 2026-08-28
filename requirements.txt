@@ -1,0 +1,7 @@
+streamlit>=1.36
+requests>=2.31
+feedparser>=6.0
+rapidfuzz>=3.9
+pandas>=2.2
+python-dotenv>=1.0
+PyYAML>=6.0

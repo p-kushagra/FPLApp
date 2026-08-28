@@ -1,0 +1,10 @@
+# News sources for the FPL Squad Assistant.
+# All free. Edit freely — add/remove feeds and subreddits.
+
+rss:
+  - http://feeds.bbci.co.uk/sport/football/rss.xml
+  - https://www.theguardian.com/football/rss
+  - https://www.skysports.com/rss/12040
+
+reddit:
+  - FantasyPL

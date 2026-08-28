@@ -28,6 +28,63 @@ AI calls go through my existing personal Claude subscription.
 See [design/technical-specification.md](design/technical-specification.md) and
 [design/solution-design.md](design/solution-design.md).
 
+## Quick start
+
+**Windows (PowerShell):**
+```powershell
+.\run.ps1 -Ingest
+```
+**macOS / Linux:**
+```bash
+./run.sh --ingest
+```
+Then open <http://localhost:8501>. On first run, edit `.env` and set `FPL_TEAM_ID`
+(the number in your FPL "Points" page URL), then click the refresh buttons on the home page.
+
+Manual setup and CLI ingestion:
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env          # set FPL_TEAM_ID
+python -m fpl_assistant.ingest --all
+streamlit run app.py
+```
+
+## Porting to another device
+
+This device may not be where the app runs. Full, step-by-step instructions for setting it
+up on the target machine (including private-repo auth and Claude config) are in
+[docs/PORTING.md](docs/PORTING.md).
+
+## Project structure
+
+```
+app.py                     Streamlit home / control panel
+pages/                     Squad, News, Transfers, Template, Captaincy
+fpl_assistant/             Core package
+  config.py                Portable config (.env + sources.yaml)
+  db.py                    SQLite schema + FTS5 index
+  fpl_client.py            FPL API client
+  news_fetch.py            RSS + Reddit fetchers
+  chunk.py / entity.py     Chunking + player tagging
+  pipeline.py              Ingestion orchestration
+  search.py                FTS5 keyword search
+  analytics.py             Squad, template, differentials, captaincy, price watch
+  insights/                Pluggable AI: Null (offline) + Claude subscription
+  ingest.py                CLI: python -m fpl_assistant.ingest --all
+config/sources.yaml        News feeds (editable)
+data/                      SQLite DB (git-ignored, regenerated locally)
+```
+
+## Insights via Claude (no API key)
+
+Set `INSIGHTS_PROVIDER=claude` in `.env`. In **bundle** mode the app writes a briefing to
+`briefings/`; run it through your Claude subscription, drop the JSON into `exports/`, and
+click **Import**. In **cli** mode (if Claude Code is installed) it calls `claude` directly.
+See [docs/PORTING.md](docs/PORTING.md#5-using-claude-for-insights-no-api-key).
+
 ## Status
 
-Design phase. Implementation to follow the phased plan in the design docs.
+Phases 1–4 implemented: FPL data, news ingest + search, Claude insights layer, and
+decision analytics. Optional Tier‑2 semantic search remains a future extension.
