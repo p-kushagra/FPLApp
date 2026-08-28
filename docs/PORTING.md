@@ -9,17 +9,35 @@ and all data is regenerated locally from free sources. Follow these steps on the
 
 ## 1. Prerequisites (target device)
 
-- **Python 3.11+** (use a standard python.org build — it includes SQLite **FTS5**, which
-  the news search needs).
+- **Python 3.11+** — install from <https://www.python.org/downloads/> and tick
+  **"Add python.exe to PATH"** during setup. Use a python.org build: it includes
+  SQLite **FTS5**, which the news search needs. The Microsoft Store stub is not
+  enough (`run.ps1` detects and rejects it).
 - **git**.
 - Internet access (to reach the FPL API and news feeds).
-- *(Optional)* **Claude Code CLI** installed and logged in, only if you want the automated
-  `cli` insights mode. Otherwise the default `bundle` mode needs nothing extra.
+- *(Optional)* **Claude Code** — only if you want automated `cli` insights. The
+  default `bundle` mode needs nothing extra.
 
-Check FTS5 is available:
+Verify Python and FTS5 in one go:
 ```powershell
+python --version
 python -c "import sqlite3; sqlite3.connect(':memory:').execute('CREATE VIRTUAL TABLE t USING fts5(x)'); print('FTS5 OK')"
 ```
+
+### Windows: allow the run script
+
+A fresh Windows install blocks local PowerShell scripts. Either allow them once
+for the session:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+or bypass per-run without changing any setting:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1 -Ingest
+```
+`run.ps1` calls `.venv\Scripts\python.exe` directly rather than activating the
+virtual environment, so it does not additionally depend on `Activate.ps1` being
+permitted.
 
 ---
 
@@ -124,6 +142,14 @@ CLAUDE_MODE=cli
 CLAUDE_CLI_PATH=claude
 ```
 The app then calls `claude -p "<prompt>"` and parses the JSON automatically — no manual step.
+
+Check the CLI is reachable before switching:
+```powershell
+claude --version
+```
+If that fails, the Claude Code VS Code extension may not expose `claude` on your
+PATH. Either set `CLAUDE_CLI_PATH` to the full executable path, or stay on
+`bundle` mode — the briefing files work with the plugin's chat panel just as well.
 
 ---
 
