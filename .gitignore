@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local data & caches (do not commit personal FPL/news data)
+data/
+*.sqlite
+*.sqlite3
+*.db
+.cache/
+.lancedb/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Insight bundles / exports (may contain scraped article text)
+briefings/
+exports/
