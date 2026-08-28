@@ -1,70 +1,166 @@
 # Curated club context: managers, coaching staff and playing style.
 #
 # WHY THIS IS A CONFIG FILE, NOT CODE
-# The FPL API publishes none of this. There is no free, reliable, machine-readable
-# feed for who manages a club, who their set-piece coach is, or how they play. So it
-# is captured here as editable facts rather than invented by the app.
+# The FPL API publishes none of this. Verified 2026-08-28: the API exposes only
+# element_types 1-4 (GKP/DEF/MID/FWD) with no manager elements, and the team object
+# carries no manager field. The official Premier League Pulse API team endpoint no
+# longer returns a staff/manager payload either (HTTP 404 across all 20 clubs).
+# So this is captured here as editable facts rather than invented by the app.
 #
 # The app does NOT depend on this file. Leave it empty and everything still works —
 # rotation tendency is measured empirically from actual line-ups in `player_gw`
 # (see squad_intel.team_rotation_profile), which is more reliable than an opinion.
-# What this file adds is human context the numbers cannot express.
 #
-# `rotation_hint` is your prior. Where observed data disagrees with it, TRUST THE
-# OBSERVED DATA — the UI shows both side by side.
+# `rotation_hint` is a PRIOR ONLY. Where observed data disagrees with it, TRUST THE
+# OBSERVED DATA — the Squad Intelligence page shows both side by side.
+#
+# ---------------------------------------------------------------------------
+# PROVENANCE
+#   manager         verified 2026-08-28 against Wikipedia "2026-27 Premier League"
+#                   and "List of current Premier League and EFL managers", which cite
+#                   club / BBC / Sky announcements. Appointment dates noted inline.
+#   style           characterisation of each coach's established approach. This is
+#                   interpretation, not a sourced fact. Correct it freely.
+#   set_piece_coach only filled where well documented. Left blank rather than guessed.
+#
+# RE-VERIFY AFTER EVERY MANAGERIAL CHANGE. Football moves faster than this file.
+# ---------------------------------------------------------------------------
 
 teams:
   ARS:
-    manager: Mikel Arteta
-    style: Positional possession, inverted full-back, very strong set-piece threat
+    manager: Mikel Arteta            # since Dec 2019; longest-serving in the top 4 tiers
+    style: Positional possession, inverted full-back, elite set-piece threat
     set_piece_coach: Nicolas Jover
     rotation_hint: moderate
-    notes: Set-piece goals are a genuine, repeatable source of defender returns.
-
-  MCI:
-    manager: Pep Guardiola
-    style: Possession dominance, false-nine variations, high defensive line
-    rotation_hint: heavy
-    notes: Famously unpredictable selection; treat any single-week read with caution.
-
-  LIV:
-    manager: Arne Slot
-    style: High press, quick vertical transitions, attacking full-backs
-    rotation_hint: settled
-    notes: Full-backs carry a large share of creative output.
-
-  CHE:
-    manager: Enzo Maresca
-    style: Build-up through a box midfield, inverted full-back
-    rotation_hint: heavy
-    notes: Large squad; rotation is frequent even without congestion.
-
-  TOT:
-    manager: Thomas Frank
-    style: Direct transitions, strong set-pieces, tactical flexibility
-    rotation_hint: moderate
-
-  MUN:
-    manager: Ruben Amorim
-    style: 3-4-2-1, wing-backs central to both attack and defence
-    rotation_hint: moderate
-    notes: Wing-back role inflates defensive and attacking returns for those slots.
-
-  NEW:
-    manager: Roberto De Zerbi
-    style: High possession, baiting presses, vertical traps
-    rotation_hint: moderate
+    notes: >
+      Reigning champions (2025-26). Set-piece goals are a genuine, repeatable source
+      of defender and centre-back returns.
 
   AVL:
-    manager: Unai Emery
-    style: Structured mid-block, high offside line
+    manager: Unai Emery              # appointed Oct 2022
+    style: Structured mid-block, high offside line, strong counter-attacking shape
     rotation_hint: moderate
-    notes: Emery rotates heavily in European weeks specifically.
+    notes: Emery rotates noticeably more in European weeks than domestic-only weeks.
 
   BHA:
-    manager: Fabian Hürzeler
-    style: Patient build-up, baiting the press, fluid front line
+    manager: Fabian Hurzeler         # appointed Jul 2024
+    style: Patient build-up, baiting the press, aggressive counter-press
+    rotation_hint: heavy
+    notes: >
+      Large young squad with a track record of frequent changes; single-week reads on
+      selection are unreliable here.
+
+  BOU:
+    manager: Marco Rose              # appointed Apr 2026, succeeded Andoni Iraola
+    style: High-intensity pressing, vertical transitions, wide runners
     rotation_hint: moderate
+    notes: New appointment - observed rotation data is the better guide this season.
+
+  BRE:
+    manager: Keith Andrews           # appointed Jun 2025, succeeded Thomas Frank
+    style: Direct play, second balls, heavily drilled set-piece routines
+    rotation_hint: settled
+    notes: Set-piece dependency makes their defenders and target men useful cheap picks.
+
+  CHE:
+    manager: Xabi Alonso             # appointed May 2026
+    style: Controlled possession, positional build-up, back-three variations
+    rotation_hint: heavy
+    notes: >
+      Very large squad and a third head coach inside a year - treat any established
+      selection pattern from previous seasons as void.
+
+  COV:
+    manager: Frank Lampard           # appointed Nov 2024
+    style: Pragmatic, transition-focused, compact out of possession
+    rotation_hint: moderate
+    notes: Promoted 2026 after 25 years away; no top-flight baseline data yet.
+
+  CRY:
+    manager: Pierre Sage             # appointed Jun 2026
+    style: Structured possession, strong emphasis on youth integration
+    rotation_hint: moderate
+    notes: New appointment - the prior is weak, defer to observed line-ups.
+
+  EVE:
+    manager: David Moyes             # appointed Jan 2025 (second spell)
+    style: Compact mid-to-low block, defensive solidity, set-piece threat
+    rotation_hint: settled
+    notes: Historically names a near-unchanged XI when fit - good for minutes certainty.
+
+  FUL:
+    manager: Alvaro Arbeloa          # appointed Jul 2026
+    style: Possession-oriented, patient build-up
+    rotation_hint: moderate
+    notes: First senior top-flight role - the style read is provisional, verify in-season.
+
+  HUL:
+    manager: Sergej Jakirovic        # appointed Jun 2025
+    style: Pragmatic, compact defensive shape, counter-attacking
+    rotation_hint: settled
+    notes: Promoted 2026 via the play-offs; no Premier League baseline yet.
+
+  IPS:
+    manager: Gary O'Neil             # appointed Jun 2026
+    style: Compact mid-block, fast counter-attacks, disciplined defensive line
+    rotation_hint: settled
+    notes: Promoted 2026 at the first attempt after relegation.
+
+  LEE:
+    manager: Daniel Farke            # appointed Jul 2023
+    style: Possession-dominant, wide overloads, full-backs pushed high
+    rotation_hint: moderate
+
+  LIV:
+    manager: Andoni Iraola           # appointed Jun 2026, succeeded Arne Slot
+    style: Aggressive man-oriented press, rapid vertical transitions
+    rotation_hint: moderate
+    notes: >
+      Iraola's Bournemouth pressed higher than almost any side; expect a high defensive
+      workload and strong defensive-contribution returns.
+
+  MCI:
+    manager: Enzo Maresca            # appointed Jun 2026, succeeded Pep Guardiola
+    style: Box midfield in build-up, inverted full-back, patient possession
+    rotation_hint: heavy
+    notes: >
+      End of the Guardiola era. Maresca rotated heavily at Chelsea - assume low
+      selection certainty until observed data says otherwise.
+
+  MUN:
+    manager: Michael Carrick         # confirmed caretaker head coach Jan 2026
+    style: Possession-based, progressive build-up through midfield
+    rotation_hint: moderate
+    notes: >
+      Took over from Ruben Amorim. Announced as caretaker in Jan 2026 - confirm his
+      current permanent or interim status before relying on any long-term read.
+
+  NEW:
+    manager: Matthias Jaissle        # appointed Aug 2026, succeeded Eddie Howe
+    style: Red Bull school - high press, vertical transitions, intense counter-press
+    rotation_hint: moderate
+    notes: Very new appointment; Howe's long-standing selection patterns no longer apply.
+
+  NFO:
+    manager: Oliver Glasner          # appointed Jul 2026
+    style: 3-4-2-1, wing-backs central to attack and defence, strong set-pieces
+    rotation_hint: moderate
+    notes: >
+      Fifth head coach in a year - squad stability is low. The wing-back roles inflate
+      both attacking and defensive returns for whoever fills them.
+
+  SUN:
+    manager: Regis Le Bris           # appointed Jun 2024
+    style: High-energy pressing, youth-led, direct in transition
+    rotation_hint: moderate
+
+  TOT:
+    manager: Roberto De Zerbi        # appointed Mar 2026, succeeded Thomas Frank
+    style: Possession, baiting the press, build-up from the goalkeeper
+    rotation_hint: moderate
+    notes: >
+      De Zerbi sides concede high-quality chances while creating plenty - attackers
+      are generally more reliable than defenders for FPL purposes.
 
 # Global defaults applied when a club is not listed above.
 defaults:

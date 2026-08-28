@@ -114,32 +114,42 @@ tournaments:
 # ---------------------------------------------------------------------------
 # Midweek European / domestic cup load. Players stay at the club but play extra
 # matches, which is the single biggest driver of in-season rotation.
-# Update the team lists after each season's qualification is settled.
+#
+# `all_clubs: true`  -> applies to every club (domestic cups).
+# `teams: [ABC, DEF]` -> applies only to those clubs.
+# An EMPTY `teams` list with no `all_clubs` flag means "not known yet" and produces
+# NO rotation flag at all. That is deliberate: a wrong club list is worse than none.
+#
+# TODO (once per season): fill in the European qualifiers after the draw is known.
+# These were left empty on 2026-08-28 because the 2026-27 qualifiers could not be
+# verified from a free source, and the previous list named relegated clubs.
 # ---------------------------------------------------------------------------
 club_competitions:
   - name: UEFA Champions League
     impact: high
     midweek: true
-    teams: [LIV, ARS, MCI, CHE, NEW, TOT]
+    teams: []
 
   - name: UEFA Europa League
     impact: medium
     midweek: true
-    teams: [AVL, MUN]
+    teams: []
 
   - name: UEFA Conference League
     impact: low
     midweek: true
-    teams: [CRY]
+    teams: []
 
   - name: EFL Cup
     impact: low
     midweek: true
-    teams: []            # empty = all clubs, until they are knocked out
+    all_clubs: true
+    teams: []
 
   - name: FA Cup
     impact: low
     midweek: false
+    all_clubs: true
     teams: []
 
 # ---------------------------------------------------------------------------

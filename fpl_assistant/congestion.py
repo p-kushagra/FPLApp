@@ -67,18 +67,23 @@ def active_events(cfg: Config, on: dt.date | None = None,
 
 
 def team_competitions(cfg: Config, team_short: str) -> list[dict]:
-    """Extra midweek competitions a club is involved in."""
+    """Extra midweek competitions a club is involved in.
+
+    An empty `teams` list without `all_clubs` means the entry is unconfigured and is
+    skipped entirely — guessing would flag all 20 clubs for a competition six enter.
+    """
     out = []
     for comp in (cfg.calendar or {}).get("club_competitions") or []:
         teams = comp.get("teams") or []
-        # An empty team list means the competition applies to every club.
-        if not teams or team_short in teams:
-            out.append({
-                "name": comp.get("name", "Competition"),
-                "impact": comp.get("impact", "low"),
-                "midweek": bool(comp.get("midweek")),
-                "all_clubs": not teams,
-            })
+        all_clubs = bool(comp.get("all_clubs"))
+        if not (all_clubs or (teams and team_short in teams)):
+            continue
+        out.append({
+            "name": comp.get("name", "Competition"),
+            "impact": comp.get("impact", "low"),
+            "midweek": bool(comp.get("midweek")),
+            "all_clubs": all_clubs,
+        })
     return out
 
 
