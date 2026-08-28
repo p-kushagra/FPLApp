@@ -2,8 +2,8 @@ import pandas as pd
 import streamlit as st
 
 from fpl_assistant import search
-from fpl_assistant.insights import (get_provider, import_exports, latest_insight,
-                                    save_insight)
+from fpl_assistant.insights import (cache_stats, get_provider, import_exports,
+                                    latest_insight, save_insight, summarise_cached)
 from fpl_assistant.ui import boot
 
 st.set_page_config(page_title="News Feed", page_icon="📰", layout="wide")
@@ -67,10 +67,14 @@ with right:
 
     if st.button("Generate insight", use_container_width=True):
         provider = get_provider(cfg)
-        insight = provider.summarise(player, news)
+        insight, from_cache = summarise_cached(conn, cfg, provider, player, news)
         save_insight(conn, insight)
-        st.success("Insight generated.")
+        st.success("Loaded from cache (no tokens used)." if from_cache
+                   else "Insight generated.")
         st.rerun()
+
+    stats = cache_stats(conn)
+    st.caption(f"Cache: {stats['entries']} stored, {stats['hits']} calls avoided.")
 
     if cfg.insights_provider == "claude" and cfg.claude_mode == "bundle":
         st.caption("Bundle mode: a briefing file is written to the briefings/ folder. "

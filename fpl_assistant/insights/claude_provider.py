@@ -26,8 +26,8 @@ SCHEMA_HINT = (
 def build_prompt(player: dict, chunks: list[dict]) -> str:
     team = player.get("team_name") or player.get("team_short") or ""
     lines = [
-        f"You are an FPL analyst. Assess availability for {player['web_name']} "
-        f"(id {player['id']}, {team}) for the upcoming gameweek.",
+        "Apply the `fpl-availability-analyst` skill in .claude/skills/ of this repo.",
+        f"Assess availability for {player['web_name']} (id {player['id']}, {team}).",
         "Use ONLY the sources below. Cite dates. Do not speculate beyond the text.",
         "Respond with a SINGLE JSON object and nothing else, matching this shape:",
         SCHEMA_HINT,
@@ -39,6 +39,35 @@ def build_prompt(player: dict, chunks: list[dict]) -> str:
     for c in chunks:
         lines.append(f"- [{c.get('published_at')}] {c.get('source')}: {c['text']} "
                      f"({c.get('url')})")
+    return "\n".join(lines)
+
+
+def build_squad_briefing(players_with_chunks: list[tuple[dict, list[dict]]]) -> str:
+    """One prompt covering the whole squad.
+
+    Batching is the main token saver: 15 separate calls repeat the instructions 15
+    times, whereas this sends them once.
+    """
+    lines = [
+        "Apply the `fpl-availability-analyst` skill in .claude/skills/ of this repo.",
+        "Assess availability + rotation risk for EVERY player listed below.",
+        "Use ONLY the sources given under each player. Cite dates. Do not speculate.",
+        "Respond with a SINGLE JSON ARRAY, one object per player, matching:",
+        SCHEMA_HINT,
+        "Return nothing except the JSON array.",
+        "",
+    ]
+    for player, chunks in players_with_chunks:
+        team = player.get("team_short") or player.get("team_name") or ""
+        lines.append(f"### {player['web_name']} (id {player['id']}, {team})")
+        if player.get("news"):
+            lines.append(f"  FPL note: {player['news']}")
+        if not chunks:
+            lines.append("  - (no recent tagged news)")
+        for c in chunks[:6]:
+            lines.append(f"  - [{(c.get('published_at') or '')[:10]}] {c.get('source')}: "
+                         f"{c['text'][:500]} ({c.get('url')})")
+        lines.append("")
     return "\n".join(lines)
 
 

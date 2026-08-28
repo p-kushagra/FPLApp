@@ -1,0 +1,69 @@
+# FPL `region` id -> country, with confederation (used for tournament eligibility).
+#
+# The FPL API returns nationality only as a numeric `region` id and publishes no
+# lookup table. These mappings were derived empirically by cross-referencing players
+# whose nationality is unambiguous. They are correct for the ids listed, but the list
+# is not exhaustive — unmapped ids simply produce no tournament flag.
+#
+# To add one: find the id on the Rotation & Congestion page ("unmapped regions"),
+# then add a line here. No code change needed.
+
+regions:
+  241: {country: England,              confederation: UEFA}
+  152: {country: Netherlands,          confederation: UEFA}
+  200: {country: Spain,                confederation: UEFA}
+  73:  {country: France,               confederation: UEFA}
+  30:  {country: Brazil,               confederation: CONMEBOL}
+  244: {country: Wales,                confederation: UEFA}
+  10:  {country: Argentina,            confederation: CONMEBOL}
+  106: {country: Italy,                confederation: UEFA}
+  21:  {country: Belgium,              confederation: UEFA}
+  80:  {country: Germany,              confederation: UEFA}
+  173: {country: Portugal,             confederation: UEFA}
+  104: {country: Republic of Ireland,  confederation: UEFA}
+  243: {country: Scotland,             confederation: UEFA}
+  206: {country: Sweden,               confederation: UEFA}
+  58:  {country: Denmark,              confederation: UEFA}
+  54:  {country: Ivory Coast,          confederation: CAF}
+  161: {country: Norway,               confederation: UEFA}
+  108: {country: Japan,                confederation: AFC}
+  157: {country: Nigeria,              confederation: CAF}
+  207: {country: Switzerland,          confederation: UEFA}
+  145: {country: Morocco,              confederation: CAF}
+  189: {country: Senegal,              confederation: CAF}
+  81:  {country: Ghana,                confederation: CAF}
+  229: {country: United States,        confederation: CONCACAF}
+  242: {country: Northern Ireland,     confederation: UEFA}
+  50:  {country: DR Congo,             confederation: CAF}
+  83:  {country: Greece,               confederation: UEFA}
+  190: {country: Serbia,               confederation: UEFA}
+  107: {country: Jamaica,              confederation: CONCACAF}
+  219: {country: Turkey,               confederation: UEFA}
+  97:  {country: Croatia,              confederation: UEFA}
+  62:  {country: Ecuador,              confederation: CONMEBOL}
+  230: {country: Uruguay,              confederation: CONMEBOL}
+  39:  {country: Canada,               confederation: CONCACAF}
+  14:  {country: Austria,              confederation: UEFA}
+  98:  {country: Hungary,              confederation: UEFA}
+  225: {country: Ukraine,              confederation: UEFA}
+  168: {country: Paraguay,             confederation: CONMEBOL}
+  3:   {country: Algeria,              confederation: CAF}
+  57:  {country: Czech Republic,       confederation: UEFA}
+  38:  {country: Cameroon,             confederation: CAF}
+  132: {country: Mali,                 confederation: CAF}
+  48:  {country: Colombia,             confederation: CONMEBOL}
+  195: {country: Slovenia,             confederation: UEFA}
+  27:  {country: Bosnia and Herzegovina, confederation: UEFA}
+  154: {country: New Zealand,          confederation: OFC}
+  172: {country: Poland,               confederation: UEFA}
+  139: {country: Mexico,               confederation: CONCACAF}
+  99:  {country: Iceland,              confederation: UEFA}
+  114: {country: South Korea,          confederation: AFC}
+  35:  {country: Burkina Faso,         confederation: CAF}
+  78:  {country: Gambia,               confederation: CAF}
+  105: {country: Israel,               confederation: UEFA}
+  44:  {country: Chile,                confederation: CONMEBOL}
+  103: {country: Iraq,                 confederation: AFC}
+  2:   {country: Albania,              confederation: UEFA}
+  34:  {country: Bulgaria,             confederation: UEFA}
+  79:  {country: Georgia,              confederation: UEFA}

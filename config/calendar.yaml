@@ -1,0 +1,175 @@
+# Competition & international calendar for rotation / congestion analysis.
+#
+# WHY THIS FILE EXISTS
+# The FPL API only knows about Premier League fixtures. It has no idea that a player
+# is away at AFCON, playing a Nations League double-header, or facing a Champions
+# League tie 72 hours before your gameweek. This file supplies that context so the
+# app can flag rotation and availability risk WITHOUT any AI calls.
+#
+# EVERYTHING HERE IS EDITABLE. Dates shift every season — update the ranges and the
+# team lists once per season (or when a draw is made) and all analysis follows.
+#
+# `nations` uses free-text country names; they are matched case-insensitively against
+# news chatter and against config/regions.yaml nationality mappings.
+
+# ---------------------------------------------------------------------------
+# International windows: players leave their clubs, travel, then return late.
+# `impact` drives the rotation-risk weighting (high | medium | low).
+# ---------------------------------------------------------------------------
+international_breaks:
+  - name: September international break
+    start: 2026-08-31
+    end: 2026-09-08
+    impact: medium
+    scope: global
+    note: World Cup qualifiers / Nations League double-headers.
+
+  - name: October international break
+    start: 2026-10-05
+    end: 2026-10-13
+    impact: medium
+    scope: global
+
+  - name: November international break
+    start: 2026-11-09
+    end: 2026-11-17
+    impact: medium
+    scope: global
+
+  - name: March international break
+    start: 2027-03-22
+    end: 2027-03-30
+    impact: medium
+    scope: global
+
+# ---------------------------------------------------------------------------
+# Major tournaments that REMOVE players from Premier League squads entirely.
+# These are the highest-impact events for FPL — a player at AFCON misses club games.
+# ---------------------------------------------------------------------------
+tournaments:
+  - name: Africa Cup of Nations (AFCON)
+    start: 2027-01-05
+    end: 2027-02-06
+    impact: high
+    removes_player: true
+    confederation: CAF
+    nations:
+      - Egypt
+      - Senegal
+      - Nigeria
+      - Ivory Coast
+      - Cote d'Ivoire
+      - Ghana
+      - Algeria
+      - Morocco
+      - Cameroon
+      - Mali
+      - Burkina Faso
+      - Tunisia
+      - DR Congo
+      - Guinea
+      - Zambia
+      - South Africa
+      - Gabon
+    note: >
+      Departure can precede the tournament start by up to two weeks and return is
+      staggered by how far the nation progresses. Treat the whole window as risk.
+
+  - name: Copa America
+    start: 2028-06-01
+    end: 2028-07-02
+    impact: high
+    removes_player: true
+    confederation: CONMEBOL
+    nations:
+      - Argentina
+      - Brazil
+      - Uruguay
+      - Colombia
+      - Chile
+      - Peru
+      - Ecuador
+      - Paraguay
+      - Venezuela
+      - Bolivia
+    note: Summer tournament — mainly affects pre-season fitness and early-season load.
+
+  - name: FIFA World Cup
+    start: 2026-06-11
+    end: 2026-07-19
+    impact: high
+    removes_player: true
+    confederation: FIFA
+    nations: []          # empty = treat all nations as affected
+    note: Post-season; drives fatigue carry-over into the following campaign.
+
+  - name: UEFA Nations League finals
+    start: 2027-06-02
+    end: 2027-06-09
+    impact: medium
+    removes_player: true
+    confederation: UEFA
+    nations: []
+
+# ---------------------------------------------------------------------------
+# Midweek European / domestic cup load. Players stay at the club but play extra
+# matches, which is the single biggest driver of in-season rotation.
+# Update the team lists after each season's qualification is settled.
+# ---------------------------------------------------------------------------
+club_competitions:
+  - name: UEFA Champions League
+    impact: high
+    midweek: true
+    teams: [LIV, ARS, MCI, CHE, NEW, TOT]
+
+  - name: UEFA Europa League
+    impact: medium
+    midweek: true
+    teams: [AVL, MUN]
+
+  - name: UEFA Conference League
+    impact: low
+    midweek: true
+    teams: [CRY]
+
+  - name: EFL Cup
+    impact: low
+    midweek: true
+    teams: []            # empty = all clubs, until they are knocked out
+
+  - name: FA Cup
+    impact: low
+    midweek: false
+    teams: []
+
+# ---------------------------------------------------------------------------
+# Domestic cup rounds. The FPL API does NOT publish cup fixtures, so the dates are
+# listed here manually. Any Premier League gameweek falling within ~4 days of a cup
+# round inherits extra rotation risk.
+# Fill these in from the EFL/FA Cup calendar at the start of the season.
+# ---------------------------------------------------------------------------
+cup_rounds:
+  - competition: EFL Cup
+    round: Third round
+    date: 2026-09-23
+  - competition: EFL Cup
+    round: Fourth round
+    date: 2026-10-28
+  - competition: EFL Cup
+    round: Quarter-final
+    date: 2026-12-16
+  - competition: FA Cup
+    round: Third round
+    date: 2027-01-09
+  - competition: FA Cup
+    round: Fourth round
+    date: 2027-01-30
+
+# ---------------------------------------------------------------------------
+# Thresholds used by the congestion engine. Tune to taste.
+# ---------------------------------------------------------------------------
+thresholds:
+  short_rest_days: 3          # <= this many days between matches = short rest
+  congested_window_days: 14   # rolling window used to count matches
+  congested_match_count: 4    # >= this many matches in the window = congested
+  heavy_minutes_per_90: 80    # avg minutes indicating a nailed starter

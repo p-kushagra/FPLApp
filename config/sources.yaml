@@ -1,10 +1,27 @@
 # News sources for the FPL Squad Assistant.
-# All free. Edit freely — add/remove feeds and subreddits.
+# All free. Every RSS feed below was verified to return HTTP 200 + valid RSS.
+# Add or remove freely — bad feeds are reported at ingest time, never silently dropped.
 
 rss:
-  - http://feeds.bbci.co.uk/sport/football/rss.xml
+  # General football news
+  - https://feeds.bbci.co.uk/sport/football/rss.xml
   - https://www.theguardian.com/football/rss
-  - https://www.skysports.com/rss/12040
+  - https://www.independent.co.uk/sport/football/rss
+  - https://metro.co.uk/sport/football/feed/
+  - https://www.mirror.co.uk/sport/football/?service=rss
+  - https://talksport.com/football/feed/
 
+  # Premier League focused
+  - https://www.skysports.com/rss/12040        # Sky Sports football
+  - https://www.skysports.com/rss/11095        # Sky Sports Premier League
+  - https://www.football.london/?service=rss   # London clubs, team-news heavy
+
+  # Wider coverage / European competitions
+  - https://www.espn.com/espn/rss/soccer/news
+  - https://www.fourfourtwo.com/feeds/all
+  - https://www.90min.com/posts.rss
+
+# Reddit is best-effort only: it returns HTTP 403 to non-OAuth clients from many
+# networks. If blocked, ingestion reports a warning and continues with RSS.
 reddit:
   - FantasyPL

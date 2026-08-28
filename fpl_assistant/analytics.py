@@ -112,7 +112,7 @@ def template(conn: sqlite3.Connection, limit: int = 25) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def captaincy(conn: sqlite3.Connection, limit: int = 15) -> list[dict]:
+def captaincy(conn: sqlite3.Connection, limit: int = 15, cfg=None) -> list[dict]:
     gw = current_gw(conn)
     shorts = _team_shorts(conn)
     rows = conn.execute(
@@ -129,10 +129,20 @@ def captaincy(conn: sqlite3.Connection, limit: int = 15) -> list[dict]:
         home = fixtures[0]["home"] if fixtures else False
         opp = shorts.get(fixtures[0]["opp"], "?") if fixtures else "—"
         score = d["form"] * 2 + (6 - (fdr or 3)) + (0.5 if home else 0.0) + d["points_per_game"]
+
+        rot_band = "—"
+        if cfg is not None:
+            from . import congestion
+            rot = congestion.rotation_risk(conn, cfg, d)
+            # Rotation risk directly reduces the chance of a captain returning points.
+            score -= rot["score"] * 0.8
+            rot_band = rot["band"]
+
         d.update({
             "cap_score": round(score, 2),
             "fdr": fdr,
             "opponent": f"{opp} ({'H' if home else 'A'})",
+            "rotation": rot_band,
         })
         scored.append(d)
     scored.sort(key=lambda x: x["cap_score"], reverse=True)
@@ -145,7 +155,7 @@ def price_watch(conn: sqlite3.Connection, rising: bool = True, limit: int = 20) 
         f"""SELECT p.web_name, t.short_name AS team_short, p.now_cost,
                    p.transfers_in_event, p.transfers_out_event,
                    (p.transfers_in_event - p.transfers_out_event) AS net,
-                   p.selected_by_percent
+                   p.selected_by_percent, p.price_change_percent
             FROM players p JOIN teams t ON t.id = p.team_id
             ORDER BY net {order}
             LIMIT ?""",

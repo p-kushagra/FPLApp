@@ -8,11 +8,12 @@ st.set_page_config(page_title="Captaincy", page_icon="©️", layout="wide")
 cfg, conn = boot()
 
 st.title("©️ Captaincy Helper")
-st.caption("Ranked by form, next-fixture difficulty, home advantage and points-per-game.")
+st.caption("Ranked by form, next-fixture difficulty, home advantage and points-per-game, "
+           "with rotation risk subtracted.")
 
 only_squad = st.checkbox("Only my squad", value=cfg.fpl_team_id is not None)
 
-candidates = analytics.captaincy(conn, limit=60)
+candidates = analytics.captaincy(conn, limit=60, cfg=cfg)
 
 if only_squad and cfg.fpl_team_id is not None:
     gw = conn.execute("SELECT value FROM meta WHERE key='current_gw'").fetchone()
@@ -28,7 +29,8 @@ if not candidates:
 st.dataframe(pd.DataFrame([{
     "Player": c["web_name"], "Team": c["team_short"], "Pos": c["position"],
     "Opponent": c["opponent"], "FDR": c["fdr"], "Form": c["form"],
-    "PPG": c["points_per_game"], "Captain score": c["cap_score"],
+    "PPG": c["points_per_game"], "Rotation": c["rotation"],
+    "Captain score": c["cap_score"],
 } for c in candidates[:20]]), use_container_width=True, hide_index=True)
 
 best = candidates[0]

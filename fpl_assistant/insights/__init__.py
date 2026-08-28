@@ -1,7 +1,8 @@
-"""Pluggable insight providers and persistence helpers."""
+"""Pluggable insight providers, response caching and persistence helpers."""
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import sqlite3
 
@@ -17,6 +18,11 @@ __all__ = [
     "save_insight",
     "import_exports",
     "latest_insight",
+    "cache_key_for",
+    "cached_insight",
+    "store_cache",
+    "cache_stats",
+    "summarise_cached",
 ]
 
 
@@ -24,6 +30,61 @@ def get_provider(cfg: Config) -> InsightsProvider:
     if cfg.insights_provider == "claude":
         return ClaudeSubscriptionProvider(cfg)
     return NullProvider()
+
+
+# ---------------------------------------------------------------------------
+# Response cache: the same news for the same player must never be paid for twice.
+# ---------------------------------------------------------------------------
+def cache_key_for(player_id: int, chunks: list[dict], provider: str) -> str:
+    """Hash of the exact evidence set, so new news invalidates the entry naturally."""
+    material = "|".join(sorted(str(c.get("id")) for c in chunks))
+    raw = f"{provider}:{player_id}:{material}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def cached_insight(conn: sqlite3.Connection, key: str) -> Insight | None:
+    row = conn.execute("SELECT payload FROM ai_cache WHERE cache_key = ?", (key,)).fetchone()
+    if not row:
+        return None
+    conn.execute("UPDATE ai_cache SET hits = hits + 1 WHERE cache_key = ?", (key,))
+    conn.commit()
+    try:
+        return Insight(**json.loads(row["payload"]))
+    except (ValueError, TypeError):
+        return None
+
+
+def store_cache(conn: sqlite3.Connection, key: str, insight: Insight) -> None:
+    conn.execute(
+        """INSERT OR REPLACE INTO ai_cache(cache_key, player_id, payload, created_at, provider, hits)
+           VALUES (?, ?, ?, ?, ?, COALESCE((SELECT hits FROM ai_cache WHERE cache_key = ?), 0))""",
+        (key, insight.player_id, json.dumps(insight.__dict__),
+         dt.datetime.utcnow().isoformat(), insight.provider, key),
+    )
+    conn.commit()
+
+
+def cache_stats(conn: sqlite3.Connection) -> dict:
+    row = conn.execute(
+        "SELECT COUNT(*) entries, COALESCE(SUM(hits), 0) hits FROM ai_cache"
+    ).fetchone()
+    return {"entries": row["entries"], "hits": row["hits"]}
+
+
+def summarise_cached(conn: sqlite3.Connection, cfg: Config, provider: InsightsProvider,
+                     player: dict, chunks: list[dict],
+                     force: bool = False) -> tuple[Insight, bool]:
+    """Return (insight, from_cache). Only calls the provider on a cache miss."""
+    key = cache_key_for(player["id"], chunks, cfg.insights_provider)
+    if not force:
+        hit = cached_insight(conn, key)
+        if hit is not None:
+            return hit, True
+    insight = provider.summarise(player, chunks)
+    # Pending bundles are not final answers, so they are not cached.
+    if insight.signal_type not in ("pending", "error"):
+        store_cache(conn, key, insight)
+    return insight, False
 
 
 def save_insight(conn: sqlite3.Connection, insight: Insight) -> None:

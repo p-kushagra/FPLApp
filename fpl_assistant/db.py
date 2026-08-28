@@ -11,7 +11,25 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
 CREATE TABLE IF NOT EXISTS teams (
   id INTEGER PRIMARY KEY,
-  name TEXT, short_name TEXT, strength INTEGER
+  name TEXT, short_name TEXT, strength INTEGER,
+  strength_attack_home INTEGER, strength_attack_away INTEGER,
+  strength_defence_home INTEGER, strength_defence_away INTEGER,
+  strength_overall_home INTEGER, strength_overall_away INTEGER
+);
+
+-- One row per player per gameweek. Built from event/{gw}/live (one request per GW),
+-- and the basis of every learned signal: starts, rotation, impact share, comebacks.
+CREATE TABLE IF NOT EXISTS player_gw (
+  player_id INTEGER, gw INTEGER,
+  minutes INTEGER, starts INTEGER, total_points INTEGER,
+  goals_scored INTEGER, assists INTEGER, clean_sheets INTEGER,
+  expected_goals REAL, expected_assists REAL,
+  expected_goal_involvements REAL, expected_goals_conceded REAL,
+  defensive_contribution REAL, tackles INTEGER, recoveries INTEGER,
+  clearances_blocks_interceptions INTEGER, saves INTEGER, bps INTEGER,
+  bonus INTEGER, yellow_cards INTEGER, red_cards INTEGER,
+  fixture_id INTEGER, opponent_team INTEGER, was_home INTEGER,
+  PRIMARY KEY (player_id, gw)
 );
 
 CREATE TABLE IF NOT EXISTS players (
@@ -22,7 +40,9 @@ CREATE TABLE IF NOT EXISTS players (
   points_per_game REAL, total_points INTEGER, status TEXT,
   chance_of_playing_next_round INTEGER,
   transfers_in_event INTEGER, transfers_out_event INTEGER,
-  news TEXT, news_added TEXT
+  news TEXT, news_added TEXT,
+  region INTEGER, known_name TEXT, minutes INTEGER, starts INTEGER,
+  price_change_percent REAL, scout_news_link TEXT, ep_next REAL
 );
 
 CREATE TABLE IF NOT EXISTS fixtures (
@@ -78,7 +98,41 @@ CREATE TABLE IF NOT EXISTS insights (
   expected_return TEXT, confidence TEXT, summary TEXT,
   source_urls TEXT, created_at TEXT, provider TEXT
 );
+
+-- Caches AI answers keyed by a hash of the exact prompt input, so identical
+-- requests never consume tokens twice.
+CREATE TABLE IF NOT EXISTS ai_cache (
+  cache_key TEXT PRIMARY KEY,
+  player_id INTEGER,
+  payload TEXT,
+  created_at TEXT,
+  provider TEXT,
+  hits INTEGER DEFAULT 0
+);
 """
+
+# Columns added after the first release; applied to existing databases on open.
+_MIGRATIONS = {
+    "players": {
+        "region": "INTEGER", "known_name": "TEXT", "minutes": "INTEGER",
+        "starts": "INTEGER", "price_change_percent": "REAL",
+        "scout_news_link": "TEXT", "ep_next": "REAL",
+        "team_join_date": "TEXT",
+    },
+    "teams": {
+        "strength_attack_home": "INTEGER", "strength_attack_away": "INTEGER",
+        "strength_defence_home": "INTEGER", "strength_defence_away": "INTEGER",
+        "strength_overall_home": "INTEGER", "strength_overall_away": "INTEGER",
+    },
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, columns in _MIGRATIONS.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, coltype in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -91,6 +145,7 @@ def init_db(db_path: Path) -> None:
     conn = connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     except sqlite3.OperationalError as exc:
         if "fts5" in str(exc).lower():

@@ -1,0 +1,67 @@
+# Curated club context: managers, coaching staff and playing style.
+#
+# WHY THIS IS A CONFIG FILE, NOT CODE
+# The FPL API publishes none of this. There is no free, reliable, machine-readable
+# feed for who manages a club, who their set-piece coach is, or how they play. So it
+# is captured here as editable facts rather than invented by the app.
+#
+# The app does NOT depend on this file. Leave it empty and everything still works —
+# rotation tendency is measured empirically from actual line-ups in `player_gw`
+# (see squad_intel.team_rotation_profile), which is more reliable than an opinion.
+# What this file adds is human context the numbers cannot express.
+#
+# `rotation_hint` is your prior. Where observed data disagrees with it, TRUST THE
+# OBSERVED DATA — the UI shows both side by side.
+
+teams:
+  ARS:
+    manager: Mikel Arteta
+    style: Positional possession, inverted full-back, very strong set-piece threat
+    set_piece_coach: Nicolas Jover
+    rotation_hint: moderate
+    notes: Set-piece goals are a genuine, repeatable source of defender returns.
+
+  MCI:
+    manager: Pep Guardiola
+    style: Possession dominance, false-nine variations, high defensive line
+    rotation_hint: heavy
+    notes: Famously unpredictable selection; treat any single-week read with caution.
+
+  LIV:
+    manager: Arne Slot
+    style: High press, quick vertical transitions, attacking full-backs
+    rotation_hint: settled
+    notes: Full-backs carry a large share of creative output.
+
+  CHE:
+    manager: Enzo Maresca
+    style: Build-up through a box midfield, inverted full-back
+    rotation_hint: heavy
+    notes: Large squad; rotation is frequent even without congestion.
+
+  TOT:
+    manager: Thomas Frank
+    style: Direct transitions, strong set-piece routines
+    rotation_hint: moderate
+
+  MUN:
+    manager: Ruben Amorim
+    style: 3-4-2-1, wing-backs central to both attack and defence
+    rotation_hint: moderate
+    notes: Wing-back role inflates defensive and attacking returns for those slots.
+
+  NEW:
+    manager: Eddie Howe
+    style: Aggressive press, wide overloads
+    rotation_hint: settled
+
+  AVL:
+    manager: Unai Emery
+    style: Structured mid-block, high offside line
+    rotation_hint: moderate
+    notes: Emery rotates heavily in European weeks specifically.
+
+# Global defaults applied when a club is not listed above.
+defaults:
+  rotation_hint: unknown
+  style: unknown

@@ -18,11 +18,13 @@ def main() -> None:
     parser.add_argument("--team", action="store_true", help="your squad picks")
     parser.add_argument("--top", action="store_true", help="top-manager template ownership")
     parser.add_argument("--news", action="store_true", help="news feeds -> search index")
+    parser.add_argument("--history", action="store_true",
+                        help="per-gameweek player history (powers the learning engine)")
     parser.add_argument("--all", action="store_true", help="run everything")
     args = parser.parse_args()
 
-    if not any([args.fpl, args.team, args.top, args.news, args.all]):
-        parser.error("choose at least one of --fpl --team --top --news --all")
+    if not any([args.fpl, args.team, args.top, args.news, args.history, args.all]):
+        parser.error("choose at least one of --fpl --team --top --news --history --all")
 
     cfg = load_config()
 
@@ -35,9 +37,14 @@ def main() -> None:
     if args.all or args.top:
         sample = pipeline.ingest_top_owned(cfg)
         print(f"Template ownership ingested from {sample} top managers.")
+    if args.all or args.history:
+        gws, rows = pipeline.ingest_history(cfg)
+        print(f"History ingested: {gws} gameweeks, {rows} player-gameweek rows.")
     if args.all or args.news:
-        articles, chunks = pipeline.ingest_news(cfg)
+        articles, chunks, errors = pipeline.ingest_news(cfg)
         print(f"News ingested: {articles} new articles, {chunks} chunks.")
+        for err in errors:
+            print(f"  ! {err}")
 
 
 if __name__ == "__main__":

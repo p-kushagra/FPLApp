@@ -31,7 +31,7 @@ st.divider()
 st.subheader("Refresh data")
 st.write("Pull the latest from the FPL API and news sources. Safe to run repeatedly.")
 
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns(5)
 
 if c1.button("① FPL data", use_container_width=True):
     with st.spinner("Fetching players, teams, fixtures…"):
@@ -48,19 +48,32 @@ if c3.button("③ Template (top managers)", use_container_width=True):
         sample = pipeline.ingest_top_owned(cfg)
     st.success(f"Template updated from {sample} managers.")
 
-if c4.button("④ News", use_container_width=True):
+if c4.button("④ History (learning)", use_container_width=True):
+    with st.spinner("Building per-gameweek history…"):
+        gws, rows = pipeline.ingest_history(cfg)
+    st.success(f"History updated: {gws} gameweek(s), {rows} rows.")
+
+if c5.button("⑤ News", use_container_width=True):
     with st.spinner("Fetching and indexing news…"):
-        articles, chunks = pipeline.ingest_news(cfg)
+        articles, chunks, errors = pipeline.ingest_news(cfg)
     st.success(f"News updated: {articles} new articles, {chunks} chunks.")
+    if errors:
+        with st.expander(f"{len(errors)} source warning(s)"):
+            for err in errors:
+                st.text(err)
 
 st.divider()
 st.subheader("Pages")
 st.markdown(
-    "- **My Squad** — ownership, fixtures, and risk badges for your 15.\n"
+    "- **My Squad** — ownership, fixtures, availability and rotation badges.\n"
     "- **News Feed** — per-player chatter with optional Claude insight.\n"
     "- **Transfer Market** — most transferred in/out, price watch.\n"
     "- **Template & Differentials** — what the elite own vs low-owned form picks.\n"
-    "- **Captaincy** — ranked captain options for the next gameweek."
+    "- **Captaincy** — ranked captain options, rotation-adjusted.\n"
+    "- **Rotation & Congestion** — fixture pile-ups, AFCON, European midweeks.\n"
+    "- **Squad Briefing** — one batched AI request for the whole squad.\n"
+    "- **Squad Intelligence** — predicted XI, key-player impact, injury knock-on, "
+    "comebacks and new signings, learned from gameweek history."
 )
 
 st.info(

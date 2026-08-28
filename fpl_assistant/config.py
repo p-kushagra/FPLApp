@@ -36,6 +36,15 @@ class Config:
     briefings_dir: Path
     exports_dir: Path
     sources: dict = field(default_factory=dict)
+    calendar: dict = field(default_factory=dict)
+    regions: dict = field(default_factory=dict)
+    managers: dict = field(default_factory=dict)
+
+
+def _load_yaml(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def load_config() -> Config:
@@ -49,9 +58,12 @@ def load_config() -> Config:
     exports_dir.mkdir(parents=True, exist_ok=True)
 
     sources_path = _resolve(_get("SOURCES_PATH", "config/sources.yaml"))
-    sources: dict = {}
-    if sources_path.exists():
-        sources = yaml.safe_load(sources_path.read_text(encoding="utf-8")) or {}
+    sources = _load_yaml(sources_path)
+
+    calendar = _load_yaml(_resolve(_get("CALENDAR_PATH", "config/calendar.yaml")))
+    regions_raw = _load_yaml(_resolve(_get("REGIONS_PATH", "config/regions.yaml")))
+    regions = {int(k): v for k, v in (regions_raw.get("regions") or {}).items()}
+    managers = _load_yaml(_resolve(_get("MANAGERS_PATH", "config/managers.yaml")))
 
     team_id = _get("FPL_TEAM_ID")
 
@@ -67,4 +79,7 @@ def load_config() -> Config:
         briefings_dir=briefings_dir,
         exports_dir=exports_dir,
         sources=sources,
+        calendar=calendar,
+        regions=regions,
+        managers=managers,
     )
