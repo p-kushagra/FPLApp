@@ -77,6 +77,24 @@ config/sources.yaml        News feeds (editable)
 data/                      SQLite DB (git-ignored, regenerated locally)
 ```
 
+## Keeping data fresh
+
+Most data refreshes itself. A few facts have **no free machine-readable feed** —
+European qualifiers, managers, cup round dates — so they live in editable YAML and
+are tracked for staleness in [config/references.yaml](config/references.yaml).
+
+```powershell
+.\scripts\weekly_refresh.ps1              # refresh now + report stale configs
+.\scripts\weekly_refresh.ps1 -Register    # install as a weekly scheduled task
+```
+```bash
+./scripts/weekly_refresh.sh --install-cron   # Tuesdays 08:00
+```
+
+Check staleness at any time with `python -m fpl_assistant.check_sources`, or add
+`--prompt` to write a Claude briefing listing exactly what to re-verify and where.
+The dashboard home page shows the same status.
+
 ## Insights via Claude (no API key)
 
 Set `INSIGHTS_PROVIDER=claude` in `.env`. In **bundle** mode the app writes a briefing to

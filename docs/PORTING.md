@@ -138,12 +138,44 @@ SQLite file is self-contained and portable across OSes.
 
 ---
 
-## 7. Keeping data fresh automatically (optional)
+## 7. Keeping data fresh automatically
 
-- **Windows Task Scheduler:** create a task that runs
-  `<repo>\.venv\Scripts\python.exe -m fpl_assistant.ingest --all` daily.
-- **cron (macOS/Linux):**
-  `0 8 * * * cd /path/to/repo && ./.venv/bin/python -m fpl_assistant.ingest --all`
+The repo ships a weekly refresh that pulls FPL data, gameweek history and news,
+then reports which manual configs are due for review.
+
+**Windows:**
+```powershell
+.\scripts\weekly_refresh.ps1 -Register     # every Tuesday 08:00
+.\scripts\weekly_refresh.ps1 -Unregister   # remove it
+```
+**macOS / Linux:**
+```bash
+chmod +x scripts/weekly_refresh.sh
+./scripts/weekly_refresh.sh --install-cron
+```
+
+Logs are written to `logs/refresh-<date>.log` (git-ignored).
+
+### Manual configs and their sources
+
+A few facts cannot be fetched — verified 2026-08-28: the FPL API exposes no
+managers and no cup fixtures, and the Premier League Pulse `/staff` endpoint
+returns 404. These live in YAML and are tracked in `config/references.yaml`:
+
+| Config | File | Review |
+|---|---|---|
+| English clubs in UEFA competitions | `config/calendar.yaml` | weekly |
+| Managers, coaches, style | `config/managers.yaml` | weekly |
+| Domestic cup round dates | `config/calendar.yaml` | monthly |
+| International breaks & tournaments | `config/calendar.yaml` | quarterly |
+| RSS feed health | `config/sources.yaml` | monthly |
+| FPL region → country | `config/regions.yaml` | 6-monthly |
+
+Check status: `python -m fpl_assistant.check_sources`
+Generate a Claude briefing: `python -m fpl_assistant.check_sources --prompt`
+
+The `fpl-config-refresh` skill in `.claude/skills/` tells Claude how to re-verify
+them and insists on cited primary sources.
 
 ---
 

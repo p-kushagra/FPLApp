@@ -120,37 +120,63 @@ tournaments:
 # An EMPTY `teams` list with no `all_clubs` flag means "not known yet" and produces
 # NO rotation flag at all. That is deliberate: a wrong club list is worse than none.
 #
-# TODO (once per season): fill in the European qualifiers after the draw is known.
-# These were left empty on 2026-08-28 because the 2026-27 qualifiers could not be
-# verified from a free source, and the previous list named relegated clubs.
+# ENGLISH QUALIFIERS VERIFIED 2026-08-28 against UEFA.com and the Wikipedia
+# season pages (which cite UEFA draw announcements). See config/references.yaml
+# for the source URLs and the review cadence.
+#
+# REVIEW WHEN: a club is eliminated from a competition (their midweek load stops),
+# or at the start of each season after the draws.
 # ---------------------------------------------------------------------------
 club_competitions:
   - name: UEFA Champions League
     impact: high
     midweek: true
-    teams: []
+    match_days: [Tuesday, Wednesday]
+    league_phase_start: 2026-09-08
+    league_phase_end: 2027-06-05
+    teams: [ARS, MCI, MUN, LIV, AVL]
+    source: https://www.uefa.com/uefachampionsleague/clubs/
+    last_verified: 2026-08-28
 
   - name: UEFA Europa League
     impact: medium
     midweek: true
-    teams: []
+    match_days: [Thursday]
+    league_phase_start: 2026-09-16
+    league_phase_end: 2027-05-26
+    teams: [CRY, BOU, SUN]
+    source: https://www.uefa.com/uefaeuropaleague/clubs/
+    last_verified: 2026-08-28
+    note: >
+      Thursday football before a Sunday gameweek is the most punishing rotation
+      pattern in the calendar. Bournemouth and Sunderland are debutants.
 
   - name: UEFA Conference League
     impact: low
     midweek: true
-    teams: []
+    match_days: [Thursday]
+    league_phase_start: 2026-10-15
+    league_phase_end: 2027-06-02
+    teams: [BHA]
+    source: https://www.uefa.com/uefaconferenceleague/clubs/
+    last_verified: 2026-08-28
+    note: Conference League squads are rotated heavily; Brighton rotate anyway.
 
   - name: EFL Cup
     impact: low
     midweek: true
     all_clubs: true
     teams: []
+    source: https://www.efl.com/carabao-cup/
+    last_verified: 2026-08-28
 
   - name: FA Cup
     impact: low
     midweek: false
     all_clubs: true
     teams: []
+    source: https://www.thefa.com/competitions/emirates-fa-cup
+    last_verified: 2026-08-28
 
 # ---------------------------------------------------------------------------
 # Domestic cup rounds. The FPL API does NOT publish cup fixtures, so the dates are

@@ -36,3 +36,6 @@ Thumbs.db
 # Insight bundles / exports (may contain scraped article text)
 briefings/
 exports/
+
+# Refresh logs
+logs/

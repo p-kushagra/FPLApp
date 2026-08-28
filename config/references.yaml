@@ -1,0 +1,132 @@
+# Source registry for everything the app cannot fetch automatically.
+#
+# WHY THIS FILE EXISTS
+# Some data refreshes itself (the FPL API, news RSS). Some does not: European
+# qualifiers, manager changes, cup round dates and tournament windows all live in
+# YAML and go stale silently. This file is the single place that records WHERE each
+# fact came from and HOW OFTEN it should be re-checked.
+#
+# `fpl_assistant/freshness.py` reads this file and warns in the dashboard when a
+# config is older than `review_every_days`. Nothing here is fetched automatically —
+# it is a checklist for the weekly refresh, for you or for the Claude agent.
+#
+# See .claude/skills/fpl-config-refresh for the agent workflow that uses this.
+
+# ---------------------------------------------------------------------------
+# Automatic - refreshed by `python -m fpl_assistant.ingest --all`.
+# Listed for completeness; no manual action needed.
+# ---------------------------------------------------------------------------
+automatic:
+  - name: FPL bootstrap (players, teams, prices, ownership)
+    url: https://fantasy.premierleague.com/api/bootstrap-static/
+    refreshed_by: ingest --fpl
+    cadence: daily
+
+  - name: FPL fixtures
+    url: https://fantasy.premierleague.com/api/fixtures/
+    refreshed_by: ingest --fpl
+    cadence: daily
+
+  - name: FPL gameweek history (learning engine)
+    url: https://fantasy.premierleague.com/api/event/{gw}/live/
+    refreshed_by: ingest --history
+    cadence: weekly
+
+  - name: Elite manager template
+    url: https://fantasy.premierleague.com/api/leagues-classic/314/standings/
+    refreshed_by: ingest --top
+    cadence: weekly
+
+  - name: News feeds
+    url: config/sources.yaml
+    refreshed_by: ingest --news
+    cadence: daily
+
+# ---------------------------------------------------------------------------
+# Manual - these must be checked and edited by hand (or by the Claude agent).
+# `last_verified` here should match the value inside the config file itself.
+# ---------------------------------------------------------------------------
+manual:
+  - key: european_qualifiers
+    name: English clubs in UEFA competitions
+    config_file: config/calendar.yaml
+    config_path: club_competitions
+    last_verified: 2026-08-28
+    review_every_days: 7
+    sources:
+      - https://www.uefa.com/uefachampionsleague/clubs/
+      - https://www.uefa.com/uefaeuropaleague/clubs/
+      - https://www.uefa.com/uefaconferenceleague/clubs/
+      - https://en.wikipedia.org/wiki/2026%E2%80%9327_UEFA_Champions_League
+      - https://en.wikipedia.org/wiki/2026%E2%80%9327_UEFA_Europa_League
+      - https://en.wikipedia.org/wiki/2026%E2%80%9327_UEFA_Conference_League
+    check: >
+      Has any English club been eliminated? Once knocked out their midweek load
+      stops, so remove them from `teams`. Knockout play-off draws in February and
+      the March/April rounds are the moments this changes.
+
+  - key: managers
+    name: Premier League managers, coaches and style
+    config_file: config/managers.yaml
+    config_path: teams
+    last_verified: 2026-08-28
+    review_every_days: 7
+    sources:
+      - https://www.premierleague.com/managers
+      - https://en.wikipedia.org/wiki/List_of_current_Premier_League_and_English_Football_League_managers
+      - https://en.wikipedia.org/wiki/2026%E2%80%9327_Premier_League
+    check: >
+      Any sackings or appointments this week? Note the FPL API does NOT expose
+      managers (element_types 1-4 only) and the Premier League Pulse staff endpoint
+      returns 404, so this is manual by necessity.
+
+  - key: cup_rounds
+    name: Domestic cup round dates
+    config_file: config/calendar.yaml
+    config_path: cup_rounds
+    last_verified: 2026-08-28
+    review_every_days: 30
+    sources:
+      - https://www.efl.com/carabao-cup/
+      - https://www.thefa.com/competitions/emirates-fa-cup
+    check: >
+      Are the next round dates confirmed? The FPL API has no cup fixtures at all,
+      so these dates only exist here.
+
+  - key: tournaments
+    name: International breaks and major tournaments
+    config_file: config/calendar.yaml
+    config_path: international_breaks, tournaments
+    last_verified: 2026-08-28
+    review_every_days: 90
+    sources:
+      - https://www.fifa.com/en/tournaments
+      - https://www.cafonline.com/total-africa-cup-of-nations/
+      - https://www.uefa.com/uefanationsleague/
+      - https://en.wikipedia.org/wiki/2026%E2%80%9327_Premier_League
+    check: >
+      Confirm AFCON / Copa America / Nations League windows and the international
+      break dates. Note 2026-27 has FOUR international breaks, not five, with a
+      three-week break spanning late September into early October.
+
+  - key: news_sources
+    name: RSS feed health
+    config_file: config/sources.yaml
+    config_path: rss
+    last_verified: 2026-08-28
+    review_every_days: 30
+    sources: []
+    check: >
+      Run `ingest --news` and read the warnings. Any feed reporting a persistent
+      non-200 or "no entries" should be replaced.
+
+  - key: regions
+    name: FPL region id to country mapping
+    config_file: config/regions.yaml
+    config_path: regions
+    last_verified: 2026-08-28
+    review_every_days: 180
+    sources: []
+    check: >
+      The Rotation & Congestion page lists unmapped region ids. Add any that cover
+      a nation in a tournament window (CAF and CONMEBOL matter most).

@@ -1,9 +1,13 @@
 """FPL Squad Assistant — Streamlit dashboard (home / control panel)."""
 from __future__ import annotations
 
+import datetime as dt
+
+import pandas as pd
 import streamlit as st
 
 from fpl_assistant.db import get_meta
+from fpl_assistant.freshness import manual_sources, refresh_prompt, stale_sources
 from fpl_assistant.ui import boot
 from fpl_assistant import pipeline
 
@@ -80,3 +84,47 @@ st.info(
     "Tip: run everything at once from a terminal with "
     "`python -m fpl_assistant.ingest --all`."
 )
+
+st.divider()
+
+# --- manual config freshness ---------------------------------------------
+st.subheader("Source freshness")
+st.caption("Some facts have no free machine-readable feed — European qualifiers, "
+           "managers, cup dates. They are tracked here so they cannot go stale "
+           "unnoticed. Sources and cadence live in `config/references.yaml`.")
+
+sources = manual_sources(cfg)
+stale = stale_sources(cfg)
+
+if stale:
+    st.warning(f"{len(stale)} config(s) due for review: "
+               + ", ".join(s["name"] for s in stale))
+else:
+    st.success("All manually maintained configs are within their review window.")
+
+st.dataframe(pd.DataFrame([{
+    "Config": s["name"],
+    "File": s["config_file"],
+    "Last verified": s["last_verified"],
+    "Age (days)": s["age_days"],
+    "Review every": s["review_every_days"],
+    "Status": s["status"],
+} for s in sources]), use_container_width=True, hide_index=True)
+
+if stale and st.button("📝 Write config-refresh briefing for Claude",
+                       use_container_width=True):
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = cfg.briefings_dir / f"config-refresh-{stamp}.md"
+    path.write_text(refresh_prompt(cfg), encoding="utf-8")
+    st.success(f"Saved to `{path}` — run it through Claude, then apply the edits.")
+
+with st.expander("Sources for the stale entries"):
+    for s in stale or sources:
+        st.markdown(f"**{s['name']}** — `{s['config_file']}`")
+        for url in s["sources"]:
+            st.markdown(f"- {url}")
+        if s["check"]:
+            st.caption(s["check"])
+
+st.caption("Automate this: `.\\scripts\\weekly_refresh.ps1 -Register` on Windows, "
+           "or `./scripts/weekly_refresh.sh --install-cron` on macOS/Linux.")

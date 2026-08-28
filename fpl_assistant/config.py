@@ -39,6 +39,7 @@ class Config:
     calendar: dict = field(default_factory=dict)
     regions: dict = field(default_factory=dict)
     managers: dict = field(default_factory=dict)
+    references: dict = field(default_factory=dict)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -64,6 +65,7 @@ def load_config() -> Config:
     regions_raw = _load_yaml(_resolve(_get("REGIONS_PATH", "config/regions.yaml")))
     regions = {int(k): v for k, v in (regions_raw.get("regions") or {}).items()}
     managers = _load_yaml(_resolve(_get("MANAGERS_PATH", "config/managers.yaml")))
+    references = _load_yaml(_resolve(_get("REFERENCES_PATH", "config/references.yaml")))
 
     team_id = _get("FPL_TEAM_ID")
 
@@ -82,4 +84,5 @@ def load_config() -> Config:
         calendar=calendar,
         regions=regions,
         managers=managers,
+        references=references,
     )
