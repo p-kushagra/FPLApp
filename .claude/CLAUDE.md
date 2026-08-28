@@ -27,7 +27,8 @@ resource.
 |---|---|
 | FPL data ingest | `fpl_assistant/pipeline.py` |
 | Fixture congestion, rotation, tournaments | `fpl_assistant/congestion.py` |
-| Squad, differentials, template, captaincy, price watch | `fpl_assistant/analytics.py` |
+| Squad, differentials, template, price watch | `fpl_assistant/analytics.py` |
+| Blank/double gameweeks, fixture runs, captaincy, chip timing | `fpl_assistant/planner.py` |
 | News keyword search (SQLite FTS5) | `fpl_assistant/search.py` |
 | Player tagging in news | `fpl_assistant/entity.py` |
 
@@ -41,7 +42,8 @@ The app works fully without AI — `INSIGHTS_PROVIDER=null` gives rule-based fla
 ## Layout
 
 ```
-app.py, pages/          Streamlit dashboard
+Refresh_Config.py       Streamlit entry point / control panel
+pages/                  Streamlit dashboard pages
 fpl_assistant/          Core package (ingest, search, analytics, congestion)
 fpl_assistant/insights/ Pluggable AI layer + response cache
 config/sources.yaml     News feeds

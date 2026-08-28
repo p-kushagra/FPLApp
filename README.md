@@ -11,12 +11,15 @@ surfaces it all in a **Streamlit** dashboard running on my own machine.
 
 - Pulls squad, ownership %, fixtures, form, prices and transfer trends from the free
   **FPL API**.
-- Ingests news via **RSS + Reddit** (free), tags each item to the relevant player, and
-  makes it searchable with **SQLite FTS5** (keyword search, no models, offline).
+- Ingests news from **15 free RSS feeds** (FPL specialists, national outlets and
+  club reporters), tags each item to the relevant player, and makes it searchable with
+  **SQLite FTS5** (keyword search, no models, offline).
 - Optionally generates natural-language **insights and injury/availability summaries**
   using my **personal Claude subscription** on my Claude VM — no cloud API key required.
+- Plans ahead: **blank and double gameweeks** (both confirmed and projected from the
+  cup calendar), fixture-difficulty runs, head-to-head records and **chip timing**.
 - Presents everything in a local **Streamlit** dashboard (squad board, risk badges,
-  transfer market, template/differentials, captaincy helper).
+  transfer market, template/differentials, captaincy helper, fixture planner).
 
 ## Cost
 
@@ -39,7 +42,8 @@ See [design/technical-specification.md](design/technical-specification.md) and
 ./run.sh --ingest
 ```
 Then open <http://localhost:8501>. On first run, edit `.env` and set `FPL_TEAM_ID`
-(the number in your FPL "Points" page URL), then click the refresh buttons on the home page.
+(the number in your FPL "Points" page URL), then click the refresh buttons on the
+**Refresh Config** page.
 
 Manual setup and CLI ingestion:
 ```powershell
@@ -48,7 +52,7 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env          # set FPL_TEAM_ID
 python -m fpl_assistant.ingest --all
-streamlit run app.py
+streamlit run Refresh_Config.py
 ```
 
 ## Porting to another device
@@ -60,17 +64,18 @@ up on the target machine (including private-repo auth and Claude config) are in
 ## Project structure
 
 ```
-app.py                     Streamlit home / control panel
-pages/                     Squad, News, Transfers, Template, Captaincy
+Refresh_Config.py          Streamlit entry point (the Refresh Config page)
+pages/                     Squad, News, Transfers, Template, Captaincy, Planner
 fpl_assistant/             Core package
   config.py                Portable config (.env + sources.yaml)
   db.py                    SQLite schema + FTS5 index
   fpl_client.py            FPL API client
-  news_fetch.py            RSS + Reddit fetchers
+  news_fetch.py            RSS fetching, source naming and feed health probes
   chunk.py / entity.py     Chunking + player tagging
   pipeline.py              Ingestion orchestration
   search.py                FTS5 keyword search
-  analytics.py             Squad, template, differentials, captaincy, price watch
+  analytics.py             Squad, template, differentials, price watch
+  planner.py               Blank/double gameweeks, fixture runs, captaincy, chips
   insights/                Pluggable AI: Null (offline) + Claude subscription
   ingest.py                CLI: python -m fpl_assistant.ingest --all
 config/sources.yaml        News feeds (editable)
@@ -93,7 +98,8 @@ are tracked for staleness in [config/references.yaml](config/references.yaml).
 
 Check staleness at any time with `python -m fpl_assistant.check_sources`, or add
 `--prompt` to write a Claude briefing listing exactly what to re-verify and where.
-The dashboard home page shows the same status.
+The **Refresh Config** page shows the same status, alongside a health check for every
+news feed.
 
 ## Insights via Claude (no API key)
 
@@ -102,7 +108,25 @@ Set `INSIGHTS_PROVIDER=claude` in `.env`. In **bundle** mode the app writes a br
 click **Import**. In **cli** mode (if Claude Code is installed) it calls `claude` directly.
 See [docs/PORTING.md](docs/PORTING.md#5-using-claude-for-insights-no-api-key).
 
+## Fixture planning and chips
+
+The **Fixture Planner** page answers the questions you have to get right weeks early:
+
+- **Which gameweeks break.** Confirmed blanks and doubles come from the fixture list.
+  Projected ones come from `config/calendar.yaml`: a gameweek sitting on an FA Cup or
+  EFL Cup round is a blank waiting to happen for every club still in that competition,
+  and the FPL API will not say so for weeks.
+- **Who to captain.** Expected points per match times the number of matches that
+  gameweek, so a double gameweek roughly doubles the score and a blank scores zero.
+  Head-to-head record against the specific opponent, minutes security and rotation risk
+  all adjust it. `form` and `points_per_game` are shrunk toward a league prior by
+  appearance count, so one early haul cannot outrank a proven premium.
+- **When to play each chip.** Bench Boost targets the peak of your squad's fixture
+  count, Free Hit the trough, Triple Captain the best double. With nothing confirmed
+  the answer is *hold* rather than a gameweek invented from noise.
+
 ## Status
 
 Phases 1–4 implemented: FPL data, news ingest + search, Claude insights layer, and
-decision analytics. Optional Tier‑2 semantic search remains a future extension.
+decision analytics, plus forward fixture/chip planning. Optional Tier‑2 semantic search
+remains a future extension.

@@ -25,7 +25,7 @@ design decisions (with alternatives considered), the component design, and the d
 flowchart TD
     subgraph Local["My PC — all local, £0"]
         FPL[FPL API client] --> DB[(SQLite + FTS5)]
-        RSS[RSS + Reddit fetchers] --> CLEAN[Clean + dedupe]
+        RSS[RSS fetchers] --> CLEAN[Clean + dedupe]
         CLEAN --> CHUNK[Chunk paragraphs]
         CHUNK --> TAG[Entity tagging\nrapidfuzz]
         TAG --> DB
@@ -47,7 +47,8 @@ without affecting the rest.
 
 ### 3.1 Ingestion
 - `fpl_client.py` — thin wrapper over FPL endpoints; caches responses; ≤1 req/sec.
-- `news_fetch.py` — `feedparser` for RSS + Reddit `.json`; normalises to a common record.
+- `news_fetch.py` — `feedparser` over named RSS feeds; normalises to a common record
+  and health-probes every source.
 - `pipeline.py` — clean → dedupe → chunk → tag → persist. Idempotent; safe to re-run.
 
 ### 3.2 Storage
@@ -66,7 +67,8 @@ without affecting the rest.
   Mode B `claude` CLI). Validates JSON output against a schema before storing.
 
 ### 3.5 Presentation
-- `app.py` — Streamlit. Pages: Squad, News, Transfers, Template, Captaincy.
+- `Refresh_Config.py` — Streamlit entry point. Pages: Squad, News, Transfers, Template,
+  Captaincy, Rotation, Briefing, Intelligence, Role Arbitrage, Fixture Planner.
 - Reads from SQLite; triggers insights on demand via a button (never automatically, to keep
   AI usage minimal and intentional).
 
@@ -93,7 +95,7 @@ without affecting the rest.
 | D-5 | **AI via personal Claude subscription** | Cloud LLM API (OpenAI/Gemini), local LLM (Ollama) | No API key/cost; no models on device; uses a subscription I already own. |
 | D-6 | **Pluggable `InsightsProvider`, Null default** | Hard-wire Claude | Core stays usable offline/AI-free; easy to swap providers later. |
 | D-7 | **`rapidfuzz` entity tagging** | LLM/NER-based tagging | Deterministic, fast, free, no model; disambiguate with team context. |
-| D-8 | **RSS + Reddit only** | X/Twitter API, premium FFS | Free and ToS-friendly; paid sources excluded. |
+| D-8 | **Free RSS only** | X/Twitter API, premium FFS | Free and ToS-friendly; paid sources excluded. Reddit was dropped 2026-08-28: it returns HTTP 403 to non-OAuth clients and contributed zero articles. |
 | D-9 | **On-demand insights (button), not per-ingest** | Summarise every article | Minimises AI usage; keeps handoffs intentional and cheap. |
 
 ---
@@ -116,7 +118,7 @@ without affecting the rest.
 - **Assumption:** Runs on my Windows PC; 8 GB RAM is sufficient (no local models).
 - **Assumption:** My Claude subscription/VM is available for on-demand insight calls.
 - **Assumption:** Single user; no need for auth, multi-tenancy, or hosting.
-- **Assumption:** Free RSS/Reddit sources provide adequate injury/availability chatter.
+- **Assumption:** Free RSS sources provide adequate injury/availability chatter.
 
 ---
 

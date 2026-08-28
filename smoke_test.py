@@ -12,7 +12,8 @@ import traceback
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from fpl_assistant import analytics, congestion, role_arbitrage, search, squad_intel
+from fpl_assistant import (analytics, congestion, news_fetch, planner,
+                           role_arbitrage, search, squad_intel)
 from fpl_assistant.freshness import manual_sources, refresh_prompt
 from fpl_assistant.insights import cache_stats, get_provider, summarise_cached
 from fpl_assistant.insights.claude_provider import build_squad_briefing
@@ -84,6 +85,21 @@ check("arb.window_risk",
       lambda: role_arbitrage.window_risk(conn, role_arbitrage.role_profile(conn, pid))["verdict"])
 check("arb.candidates", lambda: len(role_arbitrage.arbitrage_candidates(conn, cfg)))
 check("arb.squad", lambda: len(role_arbitrage.squad_arbitrage(conn)))
+
+check("planner.next_gw", lambda: planner.next_gw(conn))
+check("planner.gameweek_shape", lambda: len(planner.gameweek_shape(conn, horizon=10)))
+check("planner.unscheduled", lambda: len(planner.unscheduled_fixtures(conn)))
+check("planner.projected_disruption",
+      lambda: len(planner.projected_disruption(conn, cfg, horizon=20)))
+check("planner.fixture_run", lambda: planner.fixture_run(conn, tid, horizon=6)["label"])
+check("planner.captain_ranking", lambda: len(planner.captain_ranking(conn, cfg, limit=10)))
+check("planner.squad_coverage", lambda: len(planner.squad_gameweek_coverage(conn)))
+check("planner.chip_plan", lambda: list(planner.chip_plan(conn, cfg, horizon=8)["plan"]))
+check("planner.squad_alerts", lambda: len(planner.squad_alerts(conn, cfg)))
+
+check("news.normalize_sources",
+      lambda: len(news_fetch.normalize_sources(cfg.sources.get("rss", []))))
+check("news.clean_name", lambda: news_fetch.clean_source_name("Football � Metro"))
 
 check("freshness.manual_sources", lambda: len(manual_sources(cfg)))
 check("freshness.refresh_prompt", lambda: len(refresh_prompt(cfg)))

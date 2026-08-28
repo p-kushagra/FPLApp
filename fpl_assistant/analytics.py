@@ -113,40 +113,14 @@ def template(conn: sqlite3.Connection, limit: int = 25) -> list[dict]:
 
 
 def captaincy(conn: sqlite3.Connection, limit: int = 15, cfg=None) -> list[dict]:
-    gw = current_gw(conn)
-    shorts = _team_shorts(conn)
-    rows = conn.execute(
-        """SELECT p.*, t.short_name AS team_short
-           FROM players p JOIN teams t ON t.id = p.team_id
-           WHERE p.status = 'a' AND p.form > 0
-        """
-    ).fetchall()
-    scored = []
-    for r in rows:
-        d = dict(r)
-        fixtures = _next_fixtures(conn, d["team_id"], gw, 1)
-        fdr = fixtures[0]["fdr"] if fixtures else 3
-        home = fixtures[0]["home"] if fixtures else False
-        opp = shorts.get(fixtures[0]["opp"], "?") if fixtures else "—"
-        score = d["form"] * 2 + (6 - (fdr or 3)) + (0.5 if home else 0.0) + d["points_per_game"]
+    """Ranked captain options.
 
-        rot_band = "—"
-        if cfg is not None:
-            from . import congestion
-            rot = congestion.rotation_risk(conn, cfg, d)
-            # Rotation risk directly reduces the chance of a captain returning points.
-            score -= rot["score"] * 0.8
-            rot_band = rot["band"]
-
-        d.update({
-            "cap_score": round(score, 2),
-            "fdr": fdr,
-            "opponent": f"{opp} ({'H' if home else 'A'})",
-            "rotation": rot_band,
-        })
-        scored.append(d)
-    scored.sort(key=lambda x: x["cap_score"], reverse=True)
-    return scored[:limit]
+    The scoring lives in `planner.captain_ranking`, which also accounts for double
+    gameweeks, head-to-head records and minutes security. Kept here so existing
+    callers keep working.
+    """
+    from .planner import captain_ranking
+    return captain_ranking(conn, cfg=cfg, limit=limit)
 
 
 def price_watch(conn: sqlite3.Connection, rising: bool = True, limit: int = 20) -> list[dict]:

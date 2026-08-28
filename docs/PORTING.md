@@ -78,7 +78,7 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env              # (Linux/mac: cp .env.example .env)
 python -m fpl_assistant.ingest --all
-streamlit run app.py
+streamlit run Refresh_Config.py
 ```
 
 ---

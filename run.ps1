@@ -74,4 +74,4 @@ if ($Ingest) {
     & $venvPython -m fpl_assistant.ingest --all
 }
 
-& $venvPython -m streamlit run app.py
+& $venvPython -m streamlit run Refresh_Config.py

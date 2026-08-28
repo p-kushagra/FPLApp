@@ -25,4 +25,4 @@ if [ "${1:-}" = "--ingest" ]; then
     python -m fpl_assistant.ingest --all
 fi
 
-streamlit run app.py
+streamlit run Refresh_Config.py

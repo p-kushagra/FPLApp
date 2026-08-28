@@ -267,6 +267,54 @@ def ingest_history(cfg: Config, upto_gw: int | None = None,
         conn.close()
 
 
+def tidy_news(cfg: Config) -> dict:
+    """Repair source names and drop articles from sources no longer configured.
+
+    Old rows keep whatever name the feed advertised when they were fetched, so a
+    garbled name (Metro shipped a replacement character in its title) survives a
+    config fix until the text itself is repaired. Articles from removed feeds are
+    deleted outright: leaving year-old items from a stale source in the index means
+    they keep surfacing in player briefings as if they were news.
+    """
+    conn = connect(cfg.db_path)
+    try:
+        configured = news_fetch.normalize_sources(cfg.sources.get("rss", []) or [])
+        keep = {s["name"] for s in configured if s["name"]}
+
+        renamed = 0
+        for r in conn.execute("SELECT DISTINCT source FROM news_articles").fetchall():
+            old = r["source"] or ""
+            new = news_fetch.clean_source_name(old)
+            if new and new != old:
+                conn.execute("UPDATE news_articles SET source = ? WHERE source = ?", (new, old))
+                conn.execute("UPDATE news_chunks SET source = ? WHERE source = ?", (new, old))
+                renamed += 1
+
+        # Only prune when the config actually names its sources, so a URL-only
+        # config can never wipe the whole index.
+        removed = 0
+        if keep:
+            current = {r["source"] for r in
+                       conn.execute("SELECT DISTINCT source FROM news_articles")}
+            for orphan in current - keep:
+                ids = [r["id"] for r in conn.execute(
+                    "SELECT id FROM news_articles WHERE source = ?", (orphan,))]
+                if not ids:
+                    continue
+                marks = ",".join("?" * len(ids))
+                conn.execute(
+                    f"""DELETE FROM news_chunk_players WHERE chunk_id IN
+                        (SELECT id FROM news_chunks WHERE article_id IN ({marks}))""", ids)
+                conn.execute(f"DELETE FROM news_chunks WHERE article_id IN ({marks})", ids)
+                conn.execute(f"DELETE FROM news_articles WHERE id IN ({marks})", ids)
+                removed += len(ids)
+
+        conn.commit()
+        return {"renamed_sources": renamed, "removed_articles": removed}
+    finally:
+        conn.close()
+
+
 def ingest_news(cfg: Config) -> tuple[int, int, list[str]]:
     """Fetch news, chunk it, tag players, and index for full-text search.
 
@@ -281,11 +329,7 @@ def ingest_news(cfg: Config) -> tuple[int, int, list[str]]:
         alias_index = entity.build_alias_index(players)
 
         feeds = cfg.sources.get("rss", []) or []
-        subs = cfg.sources.get("reddit", []) or []
-        rss_items, rss_errors = news_fetch.fetch_rss(feeds)
-        reddit_items, reddit_errors = news_fetch.fetch_reddit(subs)
-        items = rss_items + reddit_items
-        errors = rss_errors + reddit_errors
+        items, errors = news_fetch.fetch_rss(feeds)
 
         now = _now()
         new_articles = 0

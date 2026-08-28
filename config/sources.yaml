@@ -1,27 +1,81 @@
 # News sources for the FPL Squad Assistant.
-# All free. Every RSS feed below was verified to return HTTP 200 + valid RSS.
-# Add or remove freely — bad feeds are reported at ingest time, never silently dropped.
+#
+# Every feed below was probed on 2026-08-28 and returned HTTP 200, valid RSS and
+# items published that same day. Bad feeds are reported at ingest time, never
+# silently dropped — check the "News sources" panel on the Refresh Config page.
+#
+# Each entry carries an explicit `name`. Do not rely on the feed's own <title>:
+# some publishers ship an empty one (Fantasy Football Scout) and some ship a
+# mojibake dash (Metro), which is why source names used to render blank or garbled.
+# A bare string is still accepted and falls back to the feed title, then the domain.
+#
+# `tier` is documentation only — it records why a source earns its place:
+#   fpl       - Fantasy Premier League analysis, price and team-news specialists
+#   national  - major national outlets with staffed football desks
+#   clubs     - club-level reporters, strongest for team news and line-ups
 
 rss:
-  # General football news
-  - https://feeds.bbci.co.uk/sport/football/rss.xml
-  - https://www.theguardian.com/football/rss
-  - https://www.independent.co.uk/sport/football/rss
-  - https://metro.co.uk/sport/football/feed/
-  - https://www.mirror.co.uk/sport/football/?service=rss
-  - https://talksport.com/football/feed/
+  # --- FPL specialists ----------------------------------------------------
+  # The reason this app has a news feed at all: injury, rotation and price
+  # coverage written specifically for Fantasy managers.
+  - name: Fantasy Football Scout
+    url: https://www.fantasyfootballscout.co.uk/feed/
+    tier: fpl
+  - name: All About FPL
+    url: https://allaboutfpl.com/feed/
+    tier: fpl
 
-  # Premier League focused
-  - https://www.skysports.com/rss/12040        # Sky Sports football
-  - https://www.skysports.com/rss/11095        # Sky Sports Premier League
-  - https://www.football.london/?service=rss   # London clubs, team-news heavy
+  # --- National outlets ---------------------------------------------------
+  - name: BBC Sport
+    url: https://feeds.bbci.co.uk/sport/football/rss.xml
+    tier: national
+  - name: The Guardian Football
+    url: https://www.theguardian.com/football/rss
+    tier: national
+  - name: Sky Sports Football
+    url: https://www.skysports.com/rss/12040
+    tier: national
+  - name: Sky Sports Premier League
+    url: https://www.skysports.com/rss/11095
+    tier: national
+  - name: The Independent Football
+    url: https://www.independent.co.uk/sport/football/rss
+    tier: national
+  - name: talkSPORT
+    url: https://talksport.com/football/feed/
+    tier: national
+  - name: Metro Football
+    url: https://metro.co.uk/sport/football/feed/
+    tier: national
+  - name: Mirror Football
+    url: https://www.mirror.co.uk/sport/football/?service=rss
+    tier: national
+  - name: FourFourTwo
+    url: https://www.fourfourtwo.com/feeds/all
+    tier: national
+  - name: Planet Football
+    url: https://www.planetfootball.com/feed
+    tier: national
+  - name: GiveMeSport Football
+    url: https://www.givemesport.com/feed/
+    tier: national
 
-  # Wider coverage / European competitions
-  - https://www.espn.com/espn/rss/soccer/news
-  - https://www.fourfourtwo.com/feeds/all
-  - https://www.90min.com/posts.rss
+  # --- Club-level reporting ----------------------------------------------
+  # Closest to the training ground, so usually first with line-up and fitness news.
+  - name: Football London
+    url: https://www.football.london/?service=rss
+    tier: clubs
+  - name: Sportskeeda Football
+    url: https://www.sportskeeda.com/feed/football
+    tier: clubs
 
-# Reddit is best-effort only: it returns HTTP 403 to non-OAuth clients from many
-# networks. If blocked, ingestion reports a warning and continues with RSS.
-reddit:
-  - FantasyPL
+# REMOVED 2026-08-28, with the reason, so they do not get re-added by mistake:
+#   ESPN Soccer   https://www.espn.com/espn/rss/soccer/news
+#       Returns HTTP 202 with no feed body — dead for RSS clients.
+#   90min         https://www.90min.com/posts.rss
+#       Still serves HTTP 200, but its newest item was 333 days old. Stale items
+#       polluted player briefings with year-old "news".
+#
+# Reddit (r/FantasyPL) was removed entirely. It returns HTTP 403 to non-OAuth
+# clients, contributed zero articles across every ingest, and supporting it meant
+# carrying a second fetcher for nothing. Reinstating it would need an OAuth app.
