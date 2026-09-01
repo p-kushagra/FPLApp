@@ -5,8 +5,6 @@ squad and drive week-on-week decisions. It combines official FPL data with footb
 "chatter" (injuries, illness, missed training) gathered from free news sources, and
 surfaces it all in a **Streamlit** dashboard running on my own machine.
 
-> **Private repository.** This project is personal and not intended for public sharing.
-
 ## What it does
 
 - Pulls squad, ownership %, fixtures, form, prices and transfer trends from the free
