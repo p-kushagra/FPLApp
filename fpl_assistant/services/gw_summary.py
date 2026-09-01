@@ -9,6 +9,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from .. import temporal
+from ..models import snapshot as snapshot_mod
 from ..models import xp as xp_model
 from ..strategy import eo as eo_mod
 from ..strategy.eo import SwingMatrix
@@ -90,6 +91,7 @@ class GWSummaryVM:
     rival_options: list[dict] = field(default_factory=list)
     selected_rivals: list[int] = field(default_factory=list)
     variance_mode: str = "luck_only"   # full | luck_only
+    snapshot_meta: dict | None = None
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -105,9 +107,14 @@ class GWSummaryVM:
         """
         if self.variance_mode == "full":
             return None
-        return ("No pre-gameweek projection stored for this GW, so only the "
-                "luck axis (actual vs underlying) is meaningful. Process needs "
-                "a forecast made before kickoff.")
+        return ("No pre-deadline projection was frozen for this gameweek, so "
+                "only the luck axis (actual vs underlying) is meaningful. "
+                "Process compares the underlying numbers against what was "
+                "forecast **before kickoff**; recomputing that forecast now "
+                "would read the result it is meant to be judged against. "
+                "The snapshot job freezes it at deadline minus one hour, so "
+                "the full two-axis view becomes available from the next "
+                "gameweek it runs for.")
 
     @property
     def buy_candidates(self) -> list[VarianceRow]:
@@ -178,7 +185,8 @@ def _kpis(conn: sqlite3.Connection, gw: int, squad_gw: int | None) -> Kpis:
 
 
 def _variance(conn: sqlite3.Connection, gw: int, squad_gw: int | None,
-              squad_only: bool = True) -> list[VarianceRow]:
+              squad_only: bool = True,
+              frozen: bool | None = None) -> list[VarianceRow]:
     """Decompose actual points into process and luck.
 
     `xp` here is the pre-gameweek projection. The split is:
@@ -205,18 +213,40 @@ def _variance(conn: sqlite3.Connection, gw: int, squad_gw: int | None,
              FROM players p
              LEFT JOIN teams t ON t.id = p.team_id
              LEFT JOIN player_gw pg ON pg.player_id = p.id AND pg.gw = ?
-             LEFT JOIN xp_projection xp
-               ON xp.player_id = p.id AND xp.gw = ?
-              AND xp.run_id = (SELECT run_id FROM xp_projection WHERE gw = ?
-                               ORDER BY computed_at DESC LIMIT 1)
+             {xp_join}
              LEFT JOIN mp_scope mp ON mp.player_id = p.id
              WHERE pg.player_id IS NOT NULL"""
+
+    # The Process axis is only meaningful against a forecast made BEFORE
+    # kickoff. `projection_snapshot` is that forecast, frozen an hour before
+    # the deadline and never rewritten. `xp_projection` is not: `recompute_xp`
+    # overwrites it continuously, so for a played gameweek it has already seen
+    # the result and subtracting it would measure nothing. Hence the join swaps
+    # entirely rather than falling back -- a post-hoc projection is not a
+    # degraded pre-kickoff one, it is a different quantity.
+    if frozen is None:
+        frozen = snapshot_mod.has_snapshot(conn, gw)
+
+    if frozen:
+        xp_join = ("LEFT JOIN projection_snapshot xp "
+                   "ON xp.player_id = p.id AND xp.gw = ?")
+        xp_params = [gw]
+    else:
+        # A typed all-NULL row so the SELECT list still resolves. Every xp
+        # column reads NULL, which the loop below already treats as "no
+        # pre-kickoff forecast" and collapses to the luck-only regime.
+        xp_join = (
+            "LEFT JOIN (SELECT NULL xp_total, NULL xp_goals, NULL xp_assists, "
+            "NULL xp_clean_sheet, NULL xp_saves, NULL xp_defcon, "
+            "NULL xp_bonus, NULL source) xp ON 0")
+        xp_params = []
+    sql = sql.format(xp_join=xp_join)
 
     scope = ("WITH mp_scope AS (SELECT player_id, multiplier FROM my_picks "
              "WHERE gw = ?) ") if squad_gw is not None else \
             ("WITH mp_scope AS (SELECT NULL AS player_id, 0 AS multiplier) ")
     params: list = [squad_gw] if squad_gw is not None else []
-    params += [gw, gw, gw]
+    params += [gw] + xp_params
 
     if squad_only and squad_gw is not None:
         sql += " AND mp.player_id IS NOT NULL"
@@ -295,9 +325,16 @@ def build(conn: sqlite3.Connection, cfg, quality: DataQuality,
         vm.errors.append(f"KPIs unavailable: {exc}")
 
     try:
-        vm.variance = _variance(conn, target, squad_gw, squad_only)
-        vm.variance_mode = ("full" if any(r.xp > 0 for r in vm.variance)
-                            else "luck_only")
+        # Mode is decided by whether a pre-kickoff snapshot exists, NOT by
+        # whether any xP value happens to be non-zero. The old test would have
+        # reported "full" as soon as `recompute_xp` had touched a played
+        # gameweek -- which is exactly the leaked projection the Process axis
+        # must never be built on.
+        frozen = snapshot_mod.has_snapshot(conn, target)
+        vm.variance = _variance(conn, target, squad_gw, squad_only,
+                                frozen=frozen)
+        vm.variance_mode = "full" if frozen else "luck_only"
+        vm.snapshot_meta = snapshot_mod.snapshot_meta(conn, target)
     except sqlite3.Error as exc:
         vm.errors.append(f"Variance unavailable: {exc}")
 

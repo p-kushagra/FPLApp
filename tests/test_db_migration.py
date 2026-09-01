@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from fpl_assistant import db as db_module
 
 V2_TABLES = [
@@ -42,7 +44,7 @@ class TestFreshDatabase:
         assert not (set(V1_TABLES) - present)
 
     def test_stamps_the_version(self, db):
-        assert db_module.schema_version(db) == db_module.SCHEMA_VERSION == 2
+        assert db_module.schema_version(db) == db_module.SCHEMA_VERSION == 4
 
     def test_adds_v2_columns_to_v1_tables(self, db):
         players = {r["name"] for r in db.execute("PRAGMA table_info(players)")}
@@ -72,12 +74,12 @@ class TestIdempotence:
 
         conn = db_module.connect(db_path)
         assert _tables(conn) == before
-        assert db_module.schema_version(conn) == 2
+        assert db_module.schema_version(conn) == 4
         conn.close()
 
     def test_migrate_on_a_current_database_changes_nothing(self, db):
-        assert db_module.migrate(db) == 2
-        assert db_module.migrate(db) == 2
+        assert db_module.migrate(db) == 4
+        assert db_module.migrate(db) == 4
 
 
 class TestUpgradeFromV1:
@@ -104,7 +106,7 @@ class TestUpgradeFromV1:
         row = conn.execute("SELECT * FROM player_gw WHERE player_id=1").fetchone()
         assert row["total_points"] == 13
         assert db_module.get_meta(conn, "current_gw") == "7"
-        assert db_module.schema_version(conn) == 2
+        assert db_module.schema_version(conn) == 4
         conn.close()
 
     def test_upgrade_writes_a_backup(self, db_path):
@@ -175,3 +177,131 @@ class TestConstraints:
         for expected in ("ix_player_gw_gw", "ix_player_gw_player",
                          "ix_fixtures_event", "ix_players_team", "ix_cache_tier"):
             assert expected in idx, expected
+
+
+class TestUpgradeFromV2:
+    """v2 -> v3 adds the projection freeze and calibration tables.
+
+    Worth its own class because v3 is the first migration to land while a real
+    database is in daily use: the v2 -> v3 step has to be additive against a
+    populated file, not merely against a fresh one.
+    """
+
+    def _make_v2(self, db_path):
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        conn.execute("INSERT INTO players(id, web_name) VALUES (1, 'Salah')")
+        conn.execute(
+            "INSERT INTO player_gw(player_id, gw, total_points) VALUES (1, 2, 13)")
+        conn.execute(
+            "INSERT OR REPLACE INTO xp_projection(player_id, gw, run_id, xp_total)"
+            " VALUES (1, 3, 'r1', 5.5)")
+        conn.commit()
+        # Wind the stamp back so the ladder genuinely replays the v3 step.
+        db_module.set_meta(conn, "schema_version", 2)
+        conn.commit()
+        conn.close()
+
+    def test_v3_tables_are_created(self, db_path):
+        self._make_v2(db_path)
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        names = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"projection_snapshot", "projection_snapshot_meta",
+                "calibration_run", "calibration_fit"} <= names
+        assert db_module.schema_version(conn) == 4
+        conn.close()
+
+    def test_existing_rows_survive_the_upgrade(self, db_path):
+        self._make_v2(db_path)
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        assert conn.execute(
+            "SELECT total_points FROM player_gw WHERE player_id=1"
+        ).fetchone()[0] == 13
+        assert conn.execute(
+            "SELECT xp_total FROM xp_projection WHERE player_id=1"
+        ).fetchone()[0] == 5.5
+        conn.close()
+
+    def test_snapshot_is_write_once_at_the_schema_level(self, db_path):
+        """The primary key is the last line of defence behind the Python guard."""
+        import sqlite3
+
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        conn.execute("INSERT INTO projection_snapshot(gw, player_id, xp_total)"
+                     " VALUES (3, 1, 4.0)")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO projection_snapshot(gw, player_id, xp_total)"
+                         " VALUES (3, 1, 9.9)")
+        conn.close()
+
+    def test_v3_step_is_idempotent(self, db_path):
+        self._make_v2(db_path)
+        db_module.init_db(db_path)
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        assert db_module.schema_version(conn) == 4
+        conn.close()
+
+
+class TestUpgradeToV4:
+    """v3 -> v4 adds historical baselines and the pre_gw_projections view.
+
+    The view is a compatibility contract: the storage design names the
+    pre-deadline freeze `pre_gw_projections`, the physical table keeps its v3
+    name `projection_snapshot`. Both names must resolve to the same rows.
+    """
+
+    def _make_v3(self, db_path):
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        conn.execute("INSERT INTO projection_snapshot(gw, player_id, xp_total)"
+                     " VALUES (3, 1, 6.1)")
+        conn.commit()
+        db_module.set_meta(conn, "schema_version", 3)
+        conn.commit()
+        conn.close()
+
+    def test_v4_objects_are_created(self, db_path):
+        self._make_v3(db_path)
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        tables = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        views = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='view'")}
+        assert "historical_player_baselines" in tables
+        assert "pre_gw_projections" in views
+        assert db_module.schema_version(conn) == 4
+        conn.close()
+
+    def test_view_mirrors_the_snapshot_table(self, db_path):
+        self._make_v3(db_path)
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        row = conn.execute(
+            "SELECT xp_total FROM pre_gw_projections WHERE gw=3 AND player_id=1"
+        ).fetchone()
+        assert row["xp_total"] == 6.1
+        conn.close()
+
+    def test_baseline_rows_key_on_player_season_source(self, db):
+        import sqlite3 as _sq
+        db.execute(
+            """INSERT INTO historical_player_baselines
+                 (player_id, season_name, source) VALUES (1, '2025/26', 'fpl_history')""")
+        with pytest.raises(_sq.IntegrityError):
+            db.execute(
+                """INSERT INTO historical_player_baselines
+                     (player_id, season_name, source) VALUES (1, '2025/26', 'fpl_history')""")
+
+    def test_v4_step_is_idempotent(self, db_path):
+        self._make_v3(db_path)
+        db_module.init_db(db_path)
+        db_module.init_db(db_path)
+        conn = db_module.connect(db_path)
+        assert db_module.schema_version(conn) == 4
+        conn.close()

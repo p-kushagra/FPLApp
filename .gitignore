@@ -6,6 +6,13 @@ __pycache__/
 build/
 dist/
 
+# Test / lint / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
 # Virtual environments
 .venv/
 venv/
@@ -32,6 +39,11 @@ data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude local state. The skills and agents under .claude/ that are already
+# tracked stay tracked (gitignore never untracks); this only stops NEW local
+# files (settings.local.json, transient session state) from being committed.
+.claude/
 
 # Insight bundles / exports (may contain scraped article text)
 briefings/

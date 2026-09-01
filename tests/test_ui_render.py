@@ -335,3 +335,110 @@ class TestDegradedStates:
         _assert_clean(app, PAGE1)
         warnings = " ".join(str(w.value) for w in app.warning)
         assert "Understat Offline" in warnings
+
+
+# ==========================================================================
+# Phase 4 - full outage chain, source failure through to rendered badge
+# ==========================================================================
+class TestOutageReachesTheScreen:
+    """R1 end to end.
+
+    The existing degradation tests set the health flag directly. This class
+    starts one level further back, at a genuinely failing Understat call, and
+    follows the consequence all the way to text on a rendered page. Every link
+    in that chain has failed independently at some point in this build; testing
+    only the ends would not have caught any of them.
+    """
+
+    def _break_understat(self, monkeypatch):
+        from fpl_assistant.sources.base import SourceResult
+        monkeypatch.setattr(
+            "fpl_assistant.sources.understat.UnderstatSource.league_players",
+            lambda self, season: SourceResult.unavailable(
+                "understat", "503 Service Unavailable"))
+
+    def test_outage_flows_from_source_failure_to_page1_banner(
+            self, seeded_db, monkeypatch):
+        from fpl_assistant.jobs import tasks
+
+        self._break_understat(monkeypatch)
+        result = tasks.ingest_understat_league(seeded_db, season=2025)
+
+        assert result["ok"] is False and result["degraded"] is True
+        assert tasks.understat_offline(seeded_db) is True
+
+        app = _run(PAGE1)
+        _assert_clean(app, PAGE1)
+        assert "Understat Offline - Using Baseline Stats" in " ".join(
+            str(w.value) for w in app.warning)
+
+    def test_outage_also_badges_page2(self, seeded_db, monkeypatch):
+        from fpl_assistant.jobs import tasks
+
+        self._break_understat(monkeypatch)
+        tasks.ingest_understat_league(seeded_db, season=2025)
+
+        app = _run(PAGE2)
+        _assert_clean(app, PAGE2)
+        assert "Understat Offline" in " ".join(
+            str(w.value) for w in app.warning)
+
+    def test_projections_still_compute_during_the_outage(self, seeded_db,
+                                                         monkeypatch):
+        """Degradation must cost accuracy, never availability."""
+        from fpl_assistant.jobs import tasks
+
+        self._break_understat(monkeypatch)
+        tasks.ingest_understat_league(seeded_db, season=2025)
+
+        out = tasks.recompute_xp(seeded_db, gws=[3])
+        assert out["ok"] and out["projections"] > 0
+        assert out["understat_ok"] is False
+        assert set(out["sources"]) == {"fpl_baseline"}
+
+    def test_snapshot_taken_during_an_outage_records_the_fact(
+            self, seeded_db, monkeypatch):
+        """A frozen forecast must carry the quality it was made under."""
+        import datetime as dt
+
+        from fpl_assistant.jobs import tasks
+        from fpl_assistant.models import snapshot as snap
+
+        self._break_understat(monkeypatch)
+        tasks.ingest_understat_league(seeded_db, season=2025)
+
+        line = snap.deadline_for(seeded_db, 3)
+        at = line.when - dt.timedelta(minutes=59)
+        result = snap.capture(seeded_db, 3, now=at)
+
+        assert result.frozen
+        assert result.understat_ok is False
+        assert snap.snapshot_meta(seeded_db, 3)["understat_ok"] == 0
+
+    def test_recovery_clears_the_banner_on_the_page(self, seeded_db):
+        from fpl_assistant.jobs import tasks
+
+        tasks._flag_understat_offline(seeded_db, "boom")
+        tasks._flag_understat_online(seeded_db)
+
+        app = _run(PAGE1)
+        _assert_clean(app, PAGE1)
+        assert "Understat Offline" not in " ".join(
+            str(w.value) for w in app.warning)
+
+
+class TestProcessAxisOnThePage:
+    def test_page1_states_the_caveat_when_nothing_is_frozen(self, seeded_db):
+        app = _run(PAGE1)
+        _assert_clean(app, PAGE1)
+        text = " ".join(str(i.value) for i in app.info)
+        assert "before kickoff" in text or "frozen" in text
+
+    def test_page1_drops_the_caveat_once_a_snapshot_exists(self, seeded_db):
+        from fpl_assistant.models import snapshot as snap
+
+        snap.capture(seeded_db, 2, force=True)
+        app = _run(PAGE1)
+        _assert_clean(app, PAGE1)
+        assert not any("No pre-deadline projection" in str(i.value)
+                       for i in app.info)

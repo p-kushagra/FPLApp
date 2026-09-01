@@ -16,6 +16,8 @@ from collections.abc import Callable
 from typing import Any
 
 from .. import temporal
+from ..models import calibration
+from ..models import snapshot as snapshot_mod
 from ..models import xp as xp_model
 from ..resolve import aliases as alias_mod
 from ..resolve import matcher
@@ -296,6 +298,71 @@ def recompute_xp(conn: sqlite3.Connection, progress: Progress = _noop,
             "sources": sources, "understat_ok": understat_ok}
 
 
+def freeze_projections(conn: sqlite3.Connection, progress: Progress = _noop,
+                       gws: list[int] | None = None, force: bool = False,
+                       lookahead: int = 3, **_: Any) -> dict:
+    """Freeze pre-deadline xP for any gameweek inside the capture window.
+
+    Scheduled alongside the other pre-deadline jobs and safe to run on every
+    tick: `snapshot.capture` refuses a gameweek that is already frozen, too far
+    out, or past its deadline, and reports the refusal instead of raising. That
+    makes the correct cron for this "run it often" rather than "run it once at
+    exactly the right minute", which is the only shape that survives a laptop
+    being closed at the wrong moment.
+    """
+    if gws is None:
+        candidates = [c.gw for c in snapshot_mod.due(conn, lookahead=lookahead)]
+    else:
+        candidates = list(gws)
+
+    if not candidates:
+        return {"ok": True, "frozen": [], "skipped": [],
+                "note": "no gameweek inside the capture window"}
+
+    understat_ok = not understat_offline(conn)
+    frozen: list[dict] = []
+    skipped: list[dict] = []
+
+    for i, gw in enumerate(candidates, start=1):
+        progress(i / len(candidates), f"freezing GW{gw}")
+        result = snapshot_mod.capture(conn, gw, force=force,
+                                      understat_ok=understat_ok)
+        record = {"gw": gw, "rows": result.rows, "reason": result.reason,
+                  "deadline_source": result.deadline_source,
+                  "lead_minutes": (round(result.lead_minutes, 1)
+                                   if result.lead_minutes is not None else None)}
+        (frozen if result.frozen else skipped).append(record)
+
+    return {"ok": True, "frozen": frozen, "skipped": skipped,
+            "understat_ok": understat_ok}
+
+
+def calibrate(conn: sqlite3.Connection, progress: Progress = _noop,
+              gws: list[int] | None = None, fit: bool = False,
+              **_: Any) -> dict:
+    """Score the model against realised points and record the verdict.
+
+    Read-only with respect to projections -- it never rewrites a forecast, only
+    grades it -- so it is safe to run at any point in the gameweek cycle.
+    """
+    progress(0.2, "scoring projections")
+    report = calibration.evaluate(conn, gws)
+    fits = calibration.fit_affine(conn, report) if fit else []
+    progress(0.9, "recording verdict")
+    calibration.persist(conn, report)
+
+    ref = report.reference
+    return {"ok": True, "verdict": report.verdict, "run_id": report.run_id,
+            "gws": report.gws, "n_rows": report.n_rows,
+            "rmse_model": report.rmse,
+            "baseline": ref.name if ref else None,
+            "rmse_baseline": ref.rmse if ref else None,
+            "decile_monotonic": report.decile.monotonic,
+            "decile_spearman": report.decile.spearman,
+            "blockers": report.blockers,
+            "fits": len(fits)}
+
+
 # --------------------------------------------------------------------------
 # DAG-C: mini-league freeze
 # --------------------------------------------------------------------------
@@ -555,6 +622,8 @@ REGISTRY: dict[str, Callable] = {
     "understat_fanout": understat_fanout,
     "resolve_entities": resolve_entities,
     "recompute_xp": recompute_xp,
+    "freeze_projections": freeze_projections,
+    "calibrate": calibrate,
     "ingest_mini_league": ingest_mini_league,
     "freeze_rivals": freeze_rivals,
     "poll_live": poll_live,

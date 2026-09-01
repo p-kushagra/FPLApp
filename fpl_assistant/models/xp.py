@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass, field
 
 from ..rules import ELEMENT_TYPE_TO_POS, load_rules
 from . import minutes as minutes_mod
+from . import priors as priors_mod
 
 # Opponent/venue adjustment exponent. 1.0 would take team strength ratios at
 # face value; 0.6 damps them, because FPL's strength numbers are coarse.
@@ -292,8 +293,22 @@ def project_player(conn: sqlite3.Connection, player: dict, gw: int,
                    fixtures: list[FixtureCtx], latest_gw: int,
                    priors: dict[str, tuple], rules: dict | None = None,
                    rotation_score: float = 0.0,
-                   understat_ok: bool = True) -> XPBreakdown:
-    """Project one player for one gameweek across all their fixtures."""
+                   understat_ok: bool = True,
+                   player_prior: priors_mod.PlayerPrior | None = None,
+                   season_minutes: float | None = None) -> XPBreakdown:
+    """Project one player for one gameweek across all their fixtures.
+
+    When `player_prior` is supplied (the baselines table has been seeded),
+    rate estimation switches from positional shrinkage to Bayesian blending
+    against the player's own historical baseline:
+
+        weight = min(1, season_minutes / 720)
+        rate   = weight * current + (1 - weight) * prior
+
+    so an N=2 sample cannot dominate a season of last-year evidence, and a
+    zero-minute player projects on 100% prior instead of a league average.
+    Without a prior the v2 positional-shrinkage path is unchanged.
+    """
     rules = rules or load_rules()
     scoring = rules["scoring"]
     etype = player.get("element_type")
@@ -331,8 +346,26 @@ def project_player(conn: sqlite3.Connection, player: dict, gw: int,
 
     xg90_raw, xa90_raw, sample_min = rates
     prior_xg, prior_xa, prior_dc = priors.get(pos, (0.1, 0.1, 5.0))
-    xg90 = _shrink(xg90_raw, sample_min, prior_xg)
-    xa90 = _shrink(xa90_raw, sample_min, prior_xa)
+
+    blend_w = None
+    if player_prior is not None:
+        # Credibility uses raw season minutes, not the recency-weighted sample
+        # behind the rate estimate -- evidence volume, not evidence freshness.
+        if season_minutes is None:
+            row = conn.execute(
+                "SELECT SUM(minutes) m FROM player_gw"
+                " WHERE player_id = ? AND gw <= ?", (pid, latest_gw)).fetchone()
+            season_minutes = float(row["m"] or 0.0) if row else 0.0
+        blend_w = priors_mod.blend_weight(season_minutes)
+        xg90 = priors_mod.blend(xg90_raw, season_minutes, player_prior.npxg90)
+        xa90 = priors_mod.blend(xa90_raw, season_minutes, player_prior.xa90)
+        if blend_w < 1.0:
+            out.notes.append(
+                f"prior {player_prior.source}/{player_prior.season}"
+                f" weight={1.0 - blend_w:.2f}")
+    else:
+        xg90 = _shrink(xg90_raw, sample_min, prior_xg)
+        xa90 = _shrink(xa90_raw, sample_min, prior_xa)
 
     # Set-piece premium from the order columns already ingested in v1.
     premium = 1.0
@@ -341,7 +374,11 @@ def project_player(conn: sqlite3.Connection, player: dict, gw: int,
     if (player.get("freekicks_order") or 99) <= 2:
         premium += SET_PIECE_PREMIUM
 
-    dc90 = _shrink(_defcon_rate(conn, pid, latest_gw), sample_min, prior_dc)
+    if player_prior is not None:
+        dc90 = priors_mod.blend(_defcon_rate(conn, pid, latest_gw),
+                                season_minutes, player_prior.defcon90)
+    else:
+        dc90 = _shrink(_defcon_rate(conn, pid, latest_gw), sample_min, prior_dc)
     saves90 = _saves_rate(conn, pid, latest_gw)
     bonus_per_app = _bonus_rate(conn, pid, latest_gw)
 
@@ -371,7 +408,16 @@ def project_player(conn: sqlite3.Connection, player: dict, gw: int,
 
         # Clean sheet, and the concession penalty for GKP/DEF
         if cs_pts > 0:
-            p_cs = math.exp(-fx.concede_lambda) * mp.p_60
+            p_cs_fixture = math.exp(-fx.concede_lambda)
+            if (player_prior is not None and blend_w is not None
+                    and player_prior.xcs_rate > 0):
+                # Early season the concede rate itself rests on carried-over
+                # FPL strength ratings; blend it toward the player's own
+                # historical (or promoted-tier base) clean-sheet rate with the
+                # same credibility weight as the attacking rates.
+                p_cs_fixture = (blend_w * p_cs_fixture
+                                + (1.0 - blend_w) * min(0.6, player_prior.xcs_rate))
+            p_cs = p_cs_fixture * mp.p_60
             out.clean_sheet += cs_pts * p_cs
             variance += (cs_pts ** 2) * p_cs * (1.0 - p_cs)
 
@@ -423,13 +469,30 @@ def project(conn: sqlite3.Connection, gws: list[int],
             player_ids: list[int] | None = None,
             rules: dict | None = None,
             understat_ok: bool = True,
-            persist: bool = True) -> dict[tuple[int, int], XPBreakdown]:
-    """Project every player over `gws`. Returns {(player_id, gw): breakdown}."""
+            persist: bool = True,
+            as_of: int | None = None,
+            neutralise_availability: bool = False,
+            ) -> dict[tuple[int, int], XPBreakdown]:
+    """Project every player over `gws`. Returns {(player_id, gw): breakdown}.
+
+    `as_of` pins the last gameweek whose results may inform the forecast. It
+    defaults to MAX(player_gw.gw), which is what live planning wants. Backtests
+    must pass `as_of = target_gw - 1` explicitly: without it a projection for an
+    already-played gameweek reads that gameweek's own results and scores itself.
+
+    `neutralise_availability` blanks the live injury fields on the player row.
+    Those columns are a *current* snapshot with no history behind them, so
+    replaying a past gameweek would otherwise apply today's injuries to it --
+    lookahead in one direction and stale nonsense in the other. Live callers
+    leave it off; backtests turn it on so minutes come purely from history.
+    """
     rules = rules or load_rules()
-    state_row = conn.execute(
-        "SELECT MAX(gw) g FROM player_gw"
-    ).fetchone()
-    latest_gw = int(state_row["g"] or 0) if state_row else 0
+    if as_of is None:
+        state_row = conn.execute(
+            "SELECT MAX(gw) g FROM player_gw"
+        ).fetchone()
+        as_of = int(state_row["g"] or 0) if state_row else 0
+    latest_gw = int(as_of)
 
     sql = """SELECT id, element_type, team_id, status, news,
                     chance_of_playing_next_round, understat_id,
@@ -440,8 +503,16 @@ def project(conn: sqlite3.Connection, gws: list[int],
         sql += f" WHERE id IN ({','.join('?' * len(player_ids))})"
         params = list(player_ids)
     players = [dict(r) for r in conn.execute(sql, params)]
+    if neutralise_availability:
+        for player in players:
+            player["status"] = "a"
+            player["news"] = None
+            player["chance_of_playing_next_round"] = None
 
     priors = _positional_priors(conn, latest_gw)
+    player_priors = priors_mod.load_priors(conn)
+    season_minutes = (priors_mod.current_season_minutes(conn, latest_gw)
+                      if player_priors else {})
     by_team = fixture_contexts(conn, gws)
     run_id = uuid.uuid4().hex[:12]
     now = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -450,10 +521,13 @@ def project(conn: sqlite3.Connection, gws: list[int],
     for player in players:
         team_id = player.get("team_id")
         team_fixtures = by_team.get(team_id, []) if team_id is not None else []
+        pid = int(player["id"])
         for gw in gws:
             fx = [f for f in team_fixtures if f.gw == gw]
             bd = project_player(conn, player, gw, fx, latest_gw, priors,
-                                rules, understat_ok=understat_ok)
+                                rules, understat_ok=understat_ok,
+                                player_prior=player_priors.get(pid),
+                                season_minutes=season_minutes.get(pid, 0.0))
             results[(bd.player_id, gw)] = bd
 
     if persist and results:
