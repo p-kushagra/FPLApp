@@ -25,7 +25,7 @@ if events:
         "Impact": e["impact"],
         "Removes player": "Yes" if e["removes_player"] else "No",
         "Status": "In progress" if e["in_progress"] else f"in {e['days_until']}d",
-    } for e in events]), use_container_width=True, hide_index=True)
+    } for e in events]), width="stretch", hide_index=True)
 else:
     st.info("No international breaks or tournaments in the next 60 days. "
             "Update `config/calendar.yaml` when new dates are confirmed.")
@@ -47,7 +47,7 @@ else:
         "Matches/14d": p["risk"]["load"]["matches_in_window"],
         "Min rest (d)": p["risk"]["load"]["min_gap_days"] or "—",
         "Why": "; ".join(p["risk"]["reasons"]) or "no congestion signals",
-    } for p in report]), use_container_width=True, hide_index=True)
+    } for p in report]), width="stretch", hide_index=True)
 
     high = [p for p in report if p["risk"]["score"] >= 3]
     if high:
@@ -74,7 +74,7 @@ with st.expander("Team fixture load (all clubs)"):
             "Midweek comps": ", ".join(c["name"] for c in comps
                                        if c["midweek"] and not c["all_clubs"]) or "—",
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
 # --- config health --------------------------------------------------------
 unmapped = congestion.unmapped_regions(conn, cfg)
@@ -84,4 +84,4 @@ if unmapped:
                    "for these players.")
         st.dataframe(pd.DataFrame([{
             "Region id": u["region"], "Players": u["count"], "Sample": u["sample"],
-        } for u in unmapped]), use_container_width=True, hide_index=True)
+        } for u in unmapped]), width="stretch", hide_index=True)

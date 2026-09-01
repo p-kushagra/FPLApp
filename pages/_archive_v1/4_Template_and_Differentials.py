@@ -21,7 +21,7 @@ with tab1:
             "Top own%": round(r["ownership_pct"], 1),
             "Top capt%": round(r["captain_pct"], 1),
             "Overall own%": r["overall_own"],
-        } for r in tmpl]), use_container_width=True, hide_index=True)
+        } for r in tmpl]), width="stretch", hide_index=True)
     else:
         st.info("No template data yet. Refresh **Template** on the home page.")
 
@@ -36,6 +36,6 @@ with tab2:
             "Player": r["web_name"], "Pos": r["position"], "Team": r["team_short"],
             "£": r["now_cost"], "Own%": r["selected_by_percent"], "Form": r["form"],
             "Next fixtures": r["next_fixtures"],
-        } for r in diffs]), use_container_width=True, hide_index=True)
+        } for r in diffs]), width="stretch", hide_index=True)
     else:
         st.info("No matches — loosen the filters or refresh **FPL data**.")

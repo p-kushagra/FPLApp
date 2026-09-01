@@ -59,7 +59,7 @@ with tab1:
             "Start streak": p["start"]["streak"],
             "Trend": p["start"]["trend"],
             "Confidence": p["start"]["confidence"],
-        } for p in xi]), use_container_width=True, hide_index=True)
+        } for p in xi]), width="stretch", hide_index=True)
     else:
         st.info("Not enough history for this club yet.")
 
@@ -79,7 +79,7 @@ with tab2:
             "Defensive share %": p["impact"]["defensive_share"],
             "Points share %": p["impact"]["points_share"],
             "Confidence": p["impact"]["confidence"],
-        } for p in kp]), use_container_width=True, hide_index=True)
+        } for p in kp]), width="stretch", hide_index=True)
     else:
         st.info("Not enough history yet.")
 
@@ -101,10 +101,10 @@ with tab3:
                    f"{eff['absent_gws']} missed — confidence **{eff['confidence']}**.")
         st.markdown("**Steps up in his absence**")
         st.dataframe(pd.DataFrame(eff["beneficiaries"]),
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
         st.markdown("**Loses out when he returns**")
         st.dataframe(pd.DataFrame(eff["displaced"]),
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
 
 # -------------------------------------------------------------------- comebacks
 with tab4:
@@ -112,7 +112,7 @@ with tab4:
                "often available before the market reacts.")
     cw = si.comeback_watch(conn)
     if cw:
-        st.dataframe(pd.DataFrame(cw), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(cw), width="stretch", hide_index=True)
     else:
         st.info("No comeback patterns detected yet (needs several gameweeks of history).")
 
@@ -121,6 +121,6 @@ with tab5:
     st.caption("Recent arrivals and how quickly they are being trusted with minutes.")
     ns = si.new_signings(conn)
     if ns:
-        st.dataframe(pd.DataFrame(ns), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(ns), width="stretch", hide_index=True)
     else:
         st.info("No join-date data available.")

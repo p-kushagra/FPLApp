@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 from . import chunk, entity, news_fetch
 from .config import Config
@@ -97,27 +98,74 @@ def ingest_fpl(cfg: Config) -> int:
         conn.close()
 
 
-def ingest_my_team(cfg: Config) -> int | None:
-    """Load your current squad picks (requires FPL_TEAM_ID)."""
+def _store_picks(conn, gw: int, payload: dict) -> str | None:
+    """Persist one gameweek's picks verbatim, including the active chip.
+
+    The `multiplier` on each pick is authoritative and is stored unaltered:
+    3 under Triple Captain, 2 for a normal captain, 1 for a starter, 0 on the
+    bench, and 0 for everyone benched under Bench Boost's inverse. Deriving it
+    from `is_captain` instead -- as v1 did downstream -- silently scores a
+    Triple Captain gameweek at 2x, which is a whole captain's haul missing from
+    every retrospective.
+
+    `active_chip` is written onto every row of the gameweek so that any query
+    that touches picks can see the chip without a second lookup.
+    """
+    chip = payload.get("active_chip") or None
+    picks = payload.get("picks") or []
+    if not picks:
+        return chip
+
+    conn.execute("DELETE FROM my_picks WHERE gw = ?", (gw,))
+    conn.executemany(
+        """INSERT OR REPLACE INTO my_picks
+             (gw, player_id, position, multiplier, is_captain, is_vice,
+              selling_price, purchase_price, chip)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [(gw, pk["element"], pk["position"], pk["multiplier"],
+          1 if pk.get("is_captain") else 0,
+          1 if pk.get("is_vice_captain") else 0,
+          (pk.get("selling_price") or 0) / 10.0 or None,
+          (pk.get("purchase_price") or 0) / 10.0 or None,
+          chip) for pk in picks])
+    return chip
+
+
+def ingest_my_team(cfg: Config, backfill: bool = True) -> int | None:
+    """Load your squad picks (requires FPL_TEAM_ID).
+
+    Backfills every played gameweek by default, not just the current one.
+    Historical picks are what make retrospective scoring possible at all -- and
+    because the chip and the multiplier are recorded per gameweek, a Triple
+    Captain played in GW2 keeps scoring 3x when GW9 is the current gameweek.
+    """
     if not cfg.fpl_team_id:
         return None
     client = FplClient()
     conn = connect(cfg.db_path)
     try:
         gw = current_gw(conn)
-        picks = client.picks(cfg.fpl_team_id, gw)
-        conn.execute("DELETE FROM my_picks WHERE gw = ?", (gw,))
-        for pk in picks["picks"]:
-            conn.execute(
-                """INSERT OR REPLACE INTO my_picks
-                   (gw, player_id, position, multiplier, is_captain, is_vice)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    gw, pk["element"], pk["position"], pk["multiplier"],
-                    1 if pk["is_captain"] else 0, 1 if pk["is_vice_captain"] else 0,
-                ),
-            )
+        chips: dict[int, str] = {}
+
+        start = 1 if backfill else gw
+        for target in range(start, gw + 1):
+            try:
+                payload = client.picks(cfg.fpl_team_id, target)
+            except Exception:
+                # A gameweek before the team was created 404s; that is a normal
+                # outcome for a mid-season entry, not a failure of the ingest.
+                continue
+            chip = _store_picks(conn, target, payload)
+            if chip:
+                chips[target] = chip
+                conn.execute(
+                    """INSERT OR REPLACE INTO chip_state
+                         (chip, available, played_gw, updated_at)
+                       VALUES (?, 0, ?, ?)""", (chip, target, _now()))
+
         set_meta(conn, "team_last_ingest", _now())
+        if chips:
+            set_meta(conn, "chips_played", json.dumps(chips))
         conn.commit()
         return gw
     finally:

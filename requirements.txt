@@ -15,3 +15,8 @@ pulp>=2.8,<4.0
 # UI. Phase 5/6 surfaces.
 altair>=5.3             # luck-vs-process scatter, chip heat strips
 streamlit-sortables>=0.3  # drag-and-drop transfer planner
+plotly>=5.22            # tactical pitch, shot maps, radars, FDR heatmap
+
+# Local background scheduling. Runs the pre-deadline projection freeze inside
+# the Streamlit process; the app degrades to manual refresh without it.
+APScheduler>=3.10,<4.0

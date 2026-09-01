@@ -22,7 +22,7 @@ with col1:
             "Player": r["web_name"], "Team": r["team_short"], "£": r["now_cost"],
             "Net in": r["net"], "In": r["transfers_in_event"],
             "Out": r["transfers_out_event"], "Own%": r["selected_by_percent"],
-        } for r in rising]), use_container_width=True, hide_index=True)
+        } for r in rising]), width="stretch", hide_index=True)
     else:
         st.info("Refresh **FPL data** on the home page.")
 
@@ -33,6 +33,6 @@ with col2:
             "Player": r["web_name"], "Team": r["team_short"], "£": r["now_cost"],
             "Net out": -r["net"], "In": r["transfers_in_event"],
             "Out": r["transfers_out_event"], "Own%": r["selected_by_percent"],
-        } for r in falling]), use_container_width=True, hide_index=True)
+        } for r in falling]), width="stretch", hide_index=True)
     else:
         st.info("Refresh **FPL data** on the home page.")

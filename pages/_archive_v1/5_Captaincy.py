@@ -39,14 +39,14 @@ st.dataframe(pd.DataFrame([{
     "Mins security": c["security"], "Rotation": c["rotation"],
     "Captain score": c["cap_score"],
     "Head-to-head": c["h2h_note"] or "—",
-} for c in playing[:20]]), use_container_width=True, hide_index=True)
+} for c in playing[:20]]), width="stretch", hide_index=True)
 
 blanking = [c for c in candidates if c["matches"] == 0]
 if blanking:
     with st.expander(f"{len(blanking)} candidate(s) have no fixture in GW{gw}"):
         st.dataframe(pd.DataFrame([{
             "Player": c["web_name"], "Team": c["team_short"], "Pos": c["position"],
-        } for c in blanking]), use_container_width=True, hide_index=True)
+        } for c in blanking]), width="stretch", hide_index=True)
 
 with st.expander("How this score is built"):
     st.markdown(

@@ -10,10 +10,10 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
+from fpl_assistant import news_fetch, pipeline
 from fpl_assistant.db import get_meta
 from fpl_assistant.freshness import manual_sources, refresh_prompt, stale_sources
 from fpl_assistant.ui import boot
-from fpl_assistant import news_fetch, pipeline
 
 st.set_page_config(page_title="Refresh Config", page_icon="⚽", layout="wide")
 
@@ -45,27 +45,27 @@ st.write("Pull the latest from the FPL API and news sources. Safe to run repeate
 
 c1, c2, c3, c4, c5 = st.columns(5)
 
-if c1.button("① FPL data", use_container_width=True):
+if c1.button("① FPL data", width="stretch"):
     with st.spinner("Fetching players, teams, fixtures…"):
         gw = pipeline.ingest_fpl(cfg)
     st.success(f"FPL data updated (GW {gw}).")
 
-if c2.button("② My squad", use_container_width=True, disabled=cfg.fpl_team_id is None):
+if c2.button("② My squad", width="stretch", disabled=cfg.fpl_team_id is None):
     with st.spinner("Fetching your picks…"):
         pipeline.ingest_my_team(cfg)
     st.success("Squad updated.")
 
-if c3.button("③ Template (top managers)", use_container_width=True):
+if c3.button("③ Template (top managers)", width="stretch"):
     with st.spinner(f"Sampling top {cfg.top_managers_sample} managers…"):
         sample = pipeline.ingest_top_owned(cfg)
     st.success(f"Template updated from {sample} managers.")
 
-if c4.button("④ History (learning)", use_container_width=True):
+if c4.button("④ History (learning)", width="stretch"):
     with st.spinner("Building per-gameweek history…"):
         gws, rows = pipeline.ingest_history(cfg)
     st.success(f"History updated: {gws} gameweek(s), {rows} rows.")
 
-if c5.button("⑤ News", use_container_width=True):
+if c5.button("⑤ News", width="stretch"):
     with st.spinner("Fetching and indexing news…"):
         articles, chunks, errors = pipeline.ingest_news(cfg)
     st.success(f"News updated: {articles} new articles, {chunks} chunks.")
@@ -93,10 +93,10 @@ st.dataframe(pd.DataFrame([{
     "Articles stored": ingested.get(s["name"] or "", {}).get("n", 0),
     "Newest stored": (ingested.get(s["name"] or "", {}).get("latest") or "—")[:16],
     "URL": s["url"],
-} for s in srcs]), use_container_width=True, hide_index=True)
+} for s in srcs]), width="stretch", hide_index=True)
 
 c1, c2 = st.columns(2)
-if c1.button("🔍 Test every feed now", use_container_width=True):
+if c1.button("🔍 Test every feed now", width="stretch"):
     with st.spinner(f"Probing {len(srcs)} feeds…"):
         probed = news_fetch.probe_sources(cfg.sources.get("rss", []) or [])
     healthy = [p for p in probed if p["ok"] and not p["note"]]
@@ -110,9 +110,9 @@ if c1.button("🔍 Test every feed now", use_container_width=True):
         "Items": p["items"],
         "Newest item": p["newest"] or "—",
         "Age (days)": p["age_days"],
-    } for p in probed]), use_container_width=True, hide_index=True)
+    } for p in probed]), width="stretch", hide_index=True)
 
-if c2.button("🧹 Tidy stored news", use_container_width=True,
+if c2.button("🧹 Tidy stored news", width="stretch",
              help="Repair garbled source names and delete articles from feeds that "
                   "are no longer configured."):
     result = pipeline.tidy_news(cfg)
@@ -167,10 +167,10 @@ st.dataframe(pd.DataFrame([{
     "Age (days)": s["age_days"],
     "Review every": s["review_every_days"],
     "Status": s["status"],
-} for s in sources]), use_container_width=True, hide_index=True)
+} for s in sources]), width="stretch", hide_index=True)
 
 if stale and st.button("📝 Write config-refresh briefing for Claude",
-                       use_container_width=True):
+                       width="stretch"):
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     path = cfg.briefings_dir / f"config-refresh-{stamp}.md"
     path.write_text(refresh_prompt(cfg), encoding="utf-8")
@@ -186,3 +186,61 @@ with st.expander("Sources for the stale entries"):
 
 st.caption("Automate this: `.\\scripts\\weekly_refresh.ps1 -Register` on Windows, "
            "or `./scripts/weekly_refresh.sh --install-cron` on macOS/Linux.")
+
+
+st.divider()
+
+# --- background scheduler --------------------------------------------------
+# The projection freeze is the one job that genuinely cannot be run on demand:
+# it has to capture the forecast an hour before the deadline, every week. This
+# runs it from inside the Streamlit process, which costs nothing and needs no
+# second service -- at the price of only running while the app is open. Every
+# scheduled job is catch-up safe, so a missed tick is recoverable.
+st.subheader("Background scheduler")
+
+from fpl_assistant import scheduler as scheduler_mod
+
+status = scheduler_mod.status()
+
+if not status.available:
+    st.info(f"{status.error}. The app works fully without it; the pre-deadline "
+            "freeze then has to be run by hand with "
+            "`python -m fpl_assistant.ingest --freeze`.")
+else:
+    sc1, sc2, sc3 = st.columns([1, 1, 3])
+    if status.running:
+        sc1.success("Running")
+        if sc2.button("Stop", width="stretch"):
+            scheduler_mod.shutdown(wait=False)
+            st.rerun()
+    else:
+        sc1.warning("Stopped")
+        if sc2.button("Start", type="primary", width="stretch"):
+            scheduler_mod.start(cfg.db_path)
+            st.rerun()
+    sc3.caption(
+        "Freezes pre-deadline projections into `pre_gw_projections` at "
+        f"deadline minus {60} minutes, and refreshes prices, reference data "
+        "and projections on a slower cadence. Only runs while this app is open.")
+
+    if status.jobs:
+        st.dataframe(
+            [{"Job": j["name"], "Next run": j["next_run"],
+              "In (min)": j["minutes_away"]} for j in status.jobs],
+            width="stretch", hide_index=True)
+
+    if st.button("Freeze projections now"):
+        with st.spinner("Freezing…"):
+            run = scheduler_mod.run_now(cfg.db_path, "freeze_projections")
+        if run and run.ok:
+            st.success(run.detail)
+        else:
+            st.error(run.detail if run else "failed")
+
+    if status.history:
+        with st.expander("Recent scheduler runs"):
+            st.dataframe(
+                [{"Job": h.name, "At": h.started_at, "Seconds": h.seconds,
+                  "OK": "yes" if h.ok else "NO", "Detail": h.detail}
+                 for h in status.history[:15]],
+                width="stretch", hide_index=True)

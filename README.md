@@ -33,6 +33,48 @@ See [design/technical-specification.md](design/technical-specification.md) and
 
 ## Quick start
 
+### Windows: one-click desktop launcher (recommended)
+
+Run once to put a **FPL Command Center** shortcut on your desktop:
+
+```powershell
+python scripts/setup_shortcut.py
+```
+
+Double-clicking it starts everything with no console window:
+
+| | |
+|---|---|
+| Dashboard | <http://localhost:8501> (opens automatically once healthy) |
+| Background daemon | live polling, price monitor, pre-deadline freeze |
+| Daemon log | `data/daemon.log` (rotating, 2 MB × 5) |
+| Stop everything | `stop_fpl.bat` |
+
+The daemon is what makes the Process-vs-Luck analysis work. It arms a one-shot
+timer for **one hour before each deadline** and freezes the projection vector
+into `pre_gw_projections` — a write-once table, so a missed freeze cannot be
+recreated later. Leaving the daemon running through the week is the whole
+point; the dashboard is optional.
+
+Scripts, if you prefer running them directly:
+
+```
+launch_fpl.bat          start daemon + dashboard, open browser
+launch_fpl_silent.vbs   same, with no console window (what the shortcut runs)
+stop_fpl.bat            graceful shutdown of both
+```
+
+Daemon on its own:
+
+```powershell
+python -m fpl_assistant.daemon           # run in the foreground
+python -m fpl_assistant.daemon --once    # run every job once and exit
+python -m fpl_assistant.daemon --status
+python -m fpl_assistant.daemon --stop    # graceful; waits for in-flight writes
+```
+
+### Or launch by hand
+
 **Windows (PowerShell):**
 ```powershell
 .\run.ps1 -Ingest

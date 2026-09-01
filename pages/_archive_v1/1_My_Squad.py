@@ -38,7 +38,7 @@ for p in squad:
     p["rotation"] = rot
 
 df = pd.DataFrame(rows)
-st.dataframe(df, use_container_width=True, hide_index=True)
+st.dataframe(df, width="stretch", hide_index=True)
 
 flagged = [p for p in squad if not p["risk"].startswith("🟢")]
 if flagged:

@@ -42,7 +42,7 @@ with tab_shape:
                   "blank": "🔴 Blank", "mixed": "🟠 Blank + double"}[g["kind"]],
         "Doubling": ", ".join(g["double_teams"]) or "—",
         "Blanking": ", ".join(g["blank_teams"]) or "—",
-    } for g in shape]), use_container_width=True, hide_index=True)
+    } for g in shape]), width="stretch", hide_index=True)
 
     st.subheader("Projected disruption")
     st.caption("The FPL fixture list stays clean until a cup tie is actually "
@@ -56,7 +56,7 @@ with tab_shape:
             "Collides with": p["reason"],
             "Notice": f"{p['weeks_notice']} week(s)",
             "Already blank in the API": "yes" if p["already_blank"] else "not yet",
-        } for p in chips["projected"]]), use_container_width=True, hide_index=True)
+        } for p in chips["projected"]]), width="stretch", hide_index=True)
     else:
         st.success("No cup rounds collide with the next "
                    f"{horizon} gameweeks. Cup dates live in `config/calendar.yaml`.")
@@ -67,7 +67,7 @@ with tab_shape:
                    "and lands as a double gameweek for both clubs.")
         st.dataframe(pd.DataFrame([{
             "Home": f["home"], "Away": f["away"],
-        } for f in chips["pending_reschedule"]]), use_container_width=True, hide_index=True)
+        } for f in chips["pending_reschedule"]]), width="stretch", hide_index=True)
 
 # --- chips ----------------------------------------------------------------
 with tab_chips:
@@ -90,7 +90,7 @@ with tab_chips:
             "Playing": c["players_playing"], "Blanking": c["players_blank"],
             "Doubling": c["players_doubling"],
         } for c in coverage])
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         st.bar_chart(df.set_index("GW")["Squad fixtures"])
     else:
         st.info("Refresh **My squad** on the Refresh Config page to get chip advice "
@@ -112,7 +112,7 @@ with tab_alerts:
             "Team": a["team"],
             "Issue": a["kind"],
             "Detail": a["detail"],
-        } for a in alerts]), use_container_width=True, hide_index=True)
+        } for a in alerts]), width="stretch", hide_index=True)
 
 # --- fixture runs ---------------------------------------------------------
 with tab_runs:
@@ -129,7 +129,7 @@ with tab_runs:
         "Fixtures": r["count"],
         "Home": r["home_count"],
         "Next six": r["summary"],
-    } for r in runs]), use_container_width=True, hide_index=True)
+    } for r in runs]), width="stretch", hide_index=True)
 
 # --- captaincy ------------------------------------------------------------
 with tab_captain:
@@ -152,7 +152,7 @@ with tab_captain:
             "Score": c["cap_score"], "Per match": c["per_match"],
             "Mins security": c["security"], "Rotation": c["rotation"],
             "Head-to-head": c["h2h_note"] or "—",
-        } for c in cands]), use_container_width=True, hide_index=True)
+        } for c in cands]), width="stretch", hide_index=True)
         st.caption("Score is expected points per match multiplied by the number of "
                    "matches that gameweek, so a double gameweek roughly doubles it and "
                    "a blank scores zero. Head-to-head is measured against the player's "

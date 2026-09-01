@@ -65,7 +65,7 @@ with right:
                    f"· {existing['provider']}")
         st.write(existing["summary"])
 
-    if st.button("Generate insight", use_container_width=True):
+    if st.button("Generate insight", width="stretch"):
         provider = get_provider(cfg)
         insight, from_cache = summarise_cached(conn, cfg, provider, player, news)
         save_insight(conn, insight)
@@ -79,7 +79,7 @@ with right:
     if cfg.insights_provider == "claude" and cfg.claude_mode == "bundle":
         st.caption("Bundle mode: a briefing file is written to the briefings/ folder. "
                    "Run it through Claude, save the JSON to exports/, then import below.")
-        if st.button("Import Claude results", use_container_width=True):
+        if st.button("Import Claude results", width="stretch"):
             count = import_exports(cfg, conn)
             st.success(f"Imported {count} insight(s).")
             st.rerun()

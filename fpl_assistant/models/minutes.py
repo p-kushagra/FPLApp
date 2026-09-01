@@ -10,7 +10,9 @@ kept consistent so the two engines cannot disagree about who is nailed.
 """
 from __future__ import annotations
 
+import datetime as dt
 import math
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -59,24 +61,188 @@ def _recency_weight(gw: int, latest_gw: int) -> float:
     return 2.0 ** (-(latest_gw - gw) / RECENCY_HALFLIFE_GW)
 
 
-def availability(player: dict, rotation_score: float = 0.0) -> float:
-    """Gate from FPL status, chance-of-playing and rotation risk.
+# --------------------------------------------------------------------------
+# Injury news parsing
+#
+# FPL states availability in two places that disagree in useful ways:
+# `chance_of_playing_next_round` is a clean percentage, and `news` is free text
+# carrying the return date and the nature of the problem. The percentage alone
+# is not enough, because it says nothing about the *shape* of the return: a
+# player at 100% in his first week back after two months out is not a 90-minute
+# player, and treating him as one is the single most expensive minutes error a
+# projection can make.
+# --------------------------------------------------------------------------
+
+# "Expected back 19 Sep", "Suspended until 19 Sep", "Back 3 Jan"
+_RETURN_DATE = re.compile(
+    r"(?:back|until|return[s]?(?:\s+on)?)\s+(\d{1,2})\s+"
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", re.IGNORECASE)
+_MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun",
+     "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+
+# A player who has left the club is never coming back into this squad, unlike
+# an injury or a suspension. Distinguishing the two stops a departed player
+# from being modelled as a returning one.
+_DEPARTED = re.compile(
+    r"joined|departed|left the club|loan|transferred", re.IGNORECASE)
+
+# Fraction of normal minutes expected in each of the first weeks back from a
+# significant absence. A returning player is eased in: a cameo, then an hour,
+# then normal service.
+RETURN_RAMP = (0.35, 0.65, 0.85)
+
+# An absence shorter than this needs no ramp -- a one-week knock does not cost
+# match fitness.
+RAMP_MIN_ABSENCE_DAYS = 21
+
+
+def parse_return_date(news: str | None,
+                      today: dt.date | None = None) -> dt.date | None:
+    """Extract an expected return date from FPL's news text.
+
+    FPL omits the year, so the year is inferred as the nearest sensible one:
+    a date more than three months in the past is read as next year, which is
+    what makes "back 3 Jan" resolve correctly when read in December.
+    """
+    if not news:
+        return None
+    match = _RETURN_DATE.search(news)
+    if match is None:
+        return None
+    today = today or dt.date.today()
+    day, month = int(match.group(1)), _MONTHS[match.group(2).lower()[:3]]
+    try:
+        candidate = dt.date(today.year, month, day)
+    except ValueError:
+        return None
+    if (today - candidate).days > 90:
+        try:
+            candidate = dt.date(today.year + 1, month, day)
+        except ValueError:
+            return None
+    return candidate
+
+
+def has_departed(player: dict) -> bool:
+    """True when the player has left the club rather than being unavailable."""
+    if (player.get("status") or "a").lower() != "u":
+        return False
+    return bool(_DEPARTED.search(player.get("news") or ""))
+
+
+def return_ramp(player: dict, today: dt.date | None = None) -> float:
+    """Minutes multiplier for a player recently back from a long absence.
+
+    Returns 1.0 for anyone who is not in a return window, so the caller can
+    multiply unconditionally.
+    """
+    today = today or dt.date.today()
+    news_added = player.get("news_added")
+    returns_on = parse_return_date(player.get("news"), today)
+    if returns_on is None or returns_on > today:
+        return 1.0
+
+    # How long were they out? Without `news_added` the absence length is
+    # unknown, and guessing it would invent a ramp for a one-match suspension.
+    if not news_added:
+        return 1.0
+    try:
+        flagged = dt.date.fromisoformat(str(news_added)[:10])
+    except ValueError:
+        return 1.0
+    if (returns_on - flagged).days < RAMP_MIN_ABSENCE_DAYS:
+        return 1.0
+
+    weeks_back = (today - returns_on).days // 7
+    if weeks_back < len(RETURN_RAMP):
+        return RETURN_RAMP[weeks_back]
+    return 1.0
+
+
+def availability(player: dict, rotation_score: float = 0.0,
+                 today: dt.date | None = None) -> float:
+    """Gate from FPL status, chance-of-playing, injury news and rotation risk.
 
     Status codes: a=available, d=doubtful, i=injured, s=suspended,
     u=unavailable, n=not in squad.
     """
     status = (player.get("status") or "a").lower()
+
     if status in ("i", "s", "u", "n"):
-        return 0.0
+        # A stated return date that has already passed means the flag is stale;
+        # FPL is often a day or two late clearing it. A departed player never
+        # gets this reprieve.
+        if has_departed(player):
+            return 0.0
+        returns_on = parse_return_date(player.get("news"), today)
+        if returns_on is None or returns_on > (today or dt.date.today()):
+            return 0.0
+        gate = 0.6   # flag is stale but unconfirmed; heavily discounted
+    else:
+        chance = player.get("chance_of_playing_next_round")
+        gate = 1.0 if chance is None else max(0.0, min(1.0, float(chance) / 100.0))
+        if status == "d" and chance is None:
+            gate = 0.5  # flagged but no percentage published
 
-    chance = player.get("chance_of_playing_next_round")
-    gate = 1.0 if chance is None else max(0.0, min(1.0, float(chance) / 100.0))
-
-    if status == "d" and chance is None:
-        gate = 0.5  # flagged but no percentage published
+    gate *= return_ramp(player, today)
 
     rotation = max(0.0, min(1.0, rotation_score / ROTATION_SCALE))
     return max(0.0, gate * (1.0 - ROTATION_WEIGHT * rotation))
+
+
+def availability_alerts(conn: sqlite3.Connection, gw: int) -> list[dict]:
+    """Squad players whose availability is in doubt for the coming deadline.
+
+    This is the pre-deadline banner: the one screen the manager must not miss,
+    ordered by how much of a hole the player would leave if they do not start.
+    """
+    # `chance_of_playing_next_round` is selected under its own name, not
+    # aliased. `availability()` reads that exact key, so aliasing it to
+    # `chance` silently hid the percentage: every flagged player collapsed to
+    # the generic 0.5 "no percentage published" branch, and a 75% doubt on an
+    # otherwise-available player scored 1.0 and never raised an alert at all.
+    rows = conn.execute(
+        """SELECT p.id, p.web_name, p.status, p.news, p.news_added,
+                  p.chance_of_playing_next_round, p.element_type,
+                  mp.multiplier, mp.is_captain, t.short_name AS team
+           FROM my_picks mp
+           JOIN players p ON p.id = mp.player_id
+           LEFT JOIN teams t ON t.id = p.team_id
+           WHERE mp.gw = ?""", (gw,)).fetchall()
+
+    alerts: list[dict] = []
+    for r in rows:
+        player = dict(r)
+        gate = availability(player)
+        if gate >= 1.0:
+            continue
+        alerts.append({
+            "player_id": int(r["id"]),
+            "player": r["web_name"],
+            "team": r["team"] or "",
+            "position": ELEMENT_TYPE_TO_POS.get(r["element_type"], "MID"),
+            "status": r["status"],
+            "chance": r["chance_of_playing_next_round"],
+            "news": (r["news"] or "")[:140],
+            "availability": round(gate, 2),
+            "returns": parse_return_date(r["news"]),
+            "starting": bool(r["multiplier"]),
+            "is_captain": bool(r["is_captain"]),
+            # FPL publishes chance-of-playing in 25% steps, so the bands are
+            # set to those steps rather than to arbitrary cut-offs:
+            #   0%      out, or any flag on the captain     -> critical
+            #   25-50%  a coin flip or worse                -> high
+            #   75%     a genuine doubt worth seeing early  -> doubt
+            # A player at 100% never reaches here (filtered above), so every
+            # row in this list is something the manager has to decide about.
+            "severity": ("critical" if gate <= 0.0 or r["is_captain"]
+                         else ("high" if gate <= 0.5 else "doubt")),
+        })
+
+    order = {"critical": 0, "high": 1, "doubt": 2}
+    alerts.sort(key=lambda a: (order[a["severity"]], -int(a["starting"])))
+    return alerts
 
 
 def profile(conn: sqlite3.Connection, player: dict, latest_gw: int,

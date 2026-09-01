@@ -41,7 +41,7 @@ with st.expander("Positional baselines (median per 90)"):
         "Position": p, "Threat/90": round(b["threat"], 1),
         "xGI/90": round(b["xgi"], 3), "CBI/90": round(b["defensive"], 1),
         "Sample": b["sample"],
-    } for p, b in baselines.items()]), use_container_width=True, hide_index=True)
+    } for p, b in baselines.items()]), width="stretch", hide_index=True)
 
 tab1, tab2, tab3 = st.tabs(["Opportunities", "My squad", "Player check"])
 
@@ -70,7 +70,7 @@ with tab1:
                 "FKs" if c["on_freekicks"] else "",
                 "pens" if c["on_penalties"] else ""])) or "—",
             "Window": c["window"]["verdict"],
-        } for c in cands]), use_container_width=True, hide_index=True)
+        } for c in cands]), width="stretch", hide_index=True)
 
         st.subheader("Best cases")
         for c in cands[:5]:
@@ -102,7 +102,7 @@ with tab2:
             "Defending vs peers": f"{p['defence_ratio']}×",
             "Extra pts/90": p["premium"]["premium_per90"],
             "Apps": p["sample"],
-        } for p in squad]), use_container_width=True, hide_index=True)
+        } for p in squad]), width="stretch", hide_index=True)
 
         deeper = [p for p in squad if p["role"] == "deeper"]
         if deeper:
@@ -139,7 +139,7 @@ with tab3:
                 st.markdown(f"**Window: {win['verdict']}** — {win['note']}")
                 if win["returning"]:
                     st.dataframe(pd.DataFrame(win["returning"]),
-                                 use_container_width=True, hide_index=True)
+                                 width="stretch", hide_index=True)
                 if win["back_now"]:
                     st.error("Already back and playing: "
                              + ", ".join(p["player"] for p in win["back_now"]))

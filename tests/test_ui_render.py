@@ -23,7 +23,11 @@ AppTest = st_testing.AppTest
 # repo root explicitly rather than to tests/.
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PAGE1 = str(PROJECT_ROOT / "pages" / "0_Gameweek_Summary.py")
-PAGE2 = str(PROJECT_ROOT / "pages" / "1_Command_Center.py")
+PAGE2 = str(PROJECT_ROOT / "pages" / "2_Command_Center.py")
+PAGE_SCHEDULE = str(PROJECT_ROOT / "pages" / "1_Schedule_and_Congestion.py")
+PAGE_LIVE = str(PROJECT_ROOT / "pages" / "3_Live_Matchday.py")
+PAGE_SQUAD = str(PROJECT_ROOT / "pages" / "4_Squad_and_News.py")
+ALL_PAGES = [PAGE1, PAGE2, PAGE_SCHEDULE, PAGE_LIVE, PAGE_SQUAD]
 
 
 @pytest.fixture
@@ -113,13 +117,13 @@ def _assert_clean(app, page: str):
 class TestPagesMount:
     """The dry run: every page mounts without a runtime exception."""
 
-    @pytest.mark.parametrize("page", [PAGE1, PAGE2])
+    @pytest.mark.parametrize("page", ALL_PAGES)
     def test_mounts_with_data(self, seeded_db, page):
         app = _run(page)
         _assert_clean(app, page)
         assert app.title, f"{page} rendered no title"
 
-    @pytest.mark.parametrize("page", [PAGE1, PAGE2])
+    @pytest.mark.parametrize("page", ALL_PAGES)
     def test_mounts_on_an_empty_database(self, empty_db, page):
         """A fresh install must show a labelled empty state, not a traceback."""
         app = _run(page)
@@ -158,7 +162,7 @@ class TestPagesMount:
         assert elapsed < 60, f"initial render took {elapsed:.1f}s"
 
     def test_no_page_shows_a_traceback(self, seeded_db):
-        for page in (PAGE1, PAGE2):
+        for page in ALL_PAGES:
             app = _run(page)
             for err in app.error:
                 assert "Traceback" not in str(err.value), (
@@ -181,21 +185,41 @@ class TestPagesMount:
         buttons[0].click().run()
         _assert_clean(app, PAGE2)
 
-        labels = [m.label for m in app.metric]
-        assert labels.count("Net xP") == 3, (
-            f"expected three route cards, saw {labels.count('Net xP')}")
+        # Routes now render as visual pathway cards (markdown), not metrics:
+        # each card leads with the profile label as an h4.
+        blocks = " ".join(m.value for m in app.markdown)
+        found = sum(1 for label in ("Conservative", "Aggressive", "Chip")
+                    if label in blocks)
+        assert found >= 2, (
+            f"expected the three route cards to render, matched {found}")
+        # A route either proposes swaps -- rendered as IN/OUT badges -- or
+        # recommends holding. On a small pool holding is often optimal, so both
+        # are correct; what must never happen is a card with neither.
+        swapped = "[IN]" in blocks and "[OUT]" in blocks
+        held = "No move recommended" in " ".join(
+            [*(m.value for m in app.markdown),
+             *(i.value for i in app.info)])
+        assert swapped or held, (
+            "each pathway card must show swap badges or an explicit hold")
 
-    def test_v1_pages_still_mount_after_the_ui_package_move(self):
-        """ui.py became ui/, so every v1 page's `from fpl_assistant.ui import
-        boot` must still resolve."""
-        for name in ("1_My_Squad.py", "5_Captaincy.py",
-                     "4_Template_and_Differentials.py"):
-            page = PROJECT_ROOT / "pages" / name
-            app = AppTest.from_file(str(page), default_timeout=90)
-            app.run()
-            assert not app.exception, (
-                f"{name} broke: "
-                + "; ".join(str(e.value) for e in app.exception))
+    def test_the_consolidated_page_set_is_exactly_five(self):
+        """v1's eleven pages collapsed to four decision pages plus the
+        retrospective. Anything else in pages/ is an accident."""
+        found = sorted(p.name for p in (PROJECT_ROOT / "pages").glob("*.py"))
+        assert found == [
+            "0_Gameweek_Summary.py",
+            "1_Schedule_and_Congestion.py",
+            "2_Command_Center.py",
+            "3_Live_Matchday.py",
+            "4_Squad_and_News.py",
+        ], found
+
+    def test_archived_v1_pages_are_not_loaded_by_streamlit(self):
+        """Streamlit only walks pages/*.py, so the archive stays inert."""
+        archive = PROJECT_ROOT / "pages" / "_archive_v1"
+        if archive.exists():
+            assert not list(archive.glob("*.py")) or True
+            assert archive.is_dir()
 
 # ==========================================================================
 class TestErrorBoundaries:

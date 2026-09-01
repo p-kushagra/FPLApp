@@ -70,7 +70,7 @@ with st.expander("Preview briefing"):
 
 col1, col2 = st.columns(2)
 
-if col1.button("💾 Save briefing to file", use_container_width=True):
+if col1.button("💾 Save briefing to file", width="stretch"):
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     path = cfg.briefings_dir / f"squad-briefing-{stamp}.md"
     path.write_text(briefing, encoding="utf-8")
@@ -78,7 +78,7 @@ if col1.button("💾 Save briefing to file", use_container_width=True):
     st.caption("Open it in Claude, then save the JSON array reply into the "
                "`exports/` folder and click Import.")
 
-if col2.button("📥 Import Claude results", use_container_width=True):
+if col2.button("📥 Import Claude results", width="stretch"):
     count = import_exports(cfg, conn)
     st.success(f"Imported {count} insight(s).")
 
