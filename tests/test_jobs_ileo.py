@@ -193,10 +193,13 @@ class TestUnderstatDegradation:
         def flaky(self, understat_id):
             if understat_id == "bad":
                 return SourceResult.unavailable("understat", "404")
-            return SourceResult.ok([], "understat")
+            return SourceResult.ok({"matches": [], "groups": {}}, "understat")
 
+        # One endpoint now carries matches, groups and shots, so the fan-out
+        # fetches the whole player payload rather than each slice separately.
+        monkeypatch.setattr(tasks.time, "sleep", lambda s: None)
         monkeypatch.setattr(
-            "fpl_assistant.sources.understat.UnderstatSource.player_matches", flaky)
+            "fpl_assistant.sources.understat.UnderstatSource.player_data", flaky)
         result = tasks.understat_fanout(db, understat_ids=["good1", "bad", "good2"])
         assert result["ok"] is True
         assert result["failed"] == ["bad"]

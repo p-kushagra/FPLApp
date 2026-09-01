@@ -106,17 +106,26 @@ with tab_swing, error_boundary("ILEO matrix", quality=quality):
     if not vm.rival_options:
         empty_state(
             "No mini-league rivals loaded",
-            "Set `FPL_LEAGUE_IDS` in `.env`, then run the mini-league ingest. "
-            "Rival squads are frozen at each deadline, so they can only be "
-            "captured after a deadline has passed.",
+            "Open **Leagues & Rivals** and press *Discover my leagues*. Your "
+            "mini-leagues are read straight from your FPL entry — nothing to "
+            "type in. Rival squads are then frozen at each deadline, so they "
+            "can only be captured after a deadline has passed.",
             icon="\U0001F465")
     else:
         labels = {r["entry_id"]: f"{r.get('player_name') or r['entry_id']} "
                                  f"(#{r.get('rank') or '?'})"
                   for r in vm.rival_options}
+        # The saved rival set is the default; the multiselect is there to
+        # narrow it for one look, not to be rebuilt from scratch every visit.
+        import fpl_assistant.leagues as leagues_mod
+
+        saved = [e for e in leagues_mod.rival_ids(conn) if e in labels]
         chosen = st.multiselect(
-            "Rival set", options=list(labels), default=list(labels)[:8],
-            format_func=lambda e: labels.get(e, str(e)))
+            "Rival set", options=list(labels),
+            default=saved or list(labels)[:8],
+            format_func=lambda e: labels.get(e, str(e)),
+            help="Edit and save the persistent set on the "
+                 "**Leagues & Rivals** page.")
 
         if not chosen:
             empty_state("No rivals selected",

@@ -134,7 +134,20 @@ class TestSchedule:
         scheduler = daemon.build()
         ids = {j.id for j in scheduler.get_jobs()}
         assert {"matchday_poll", "deadline_supervisor", "price_monitor",
-                "reference_refresh"} <= ids
+                "reference_refresh", "league_refresh", "rival_freeze"} <= ids
+
+    def test_rival_freeze_runs_often_enough_to_catch_a_deadline(self, prepared):
+        """Rival picks are readable only after the lock, so this cannot be
+        armed at an exact moment like the projection freeze -- it polls."""
+        db_path, _ = prepared
+        job = daemon_mod.Daemon(db_path).build().get_job("rival_freeze")
+        assert job.trigger.interval.total_seconds() <= 30 * 60
+
+    def test_league_discovery_is_scheduled(self, prepared):
+        db_path, _ = prepared
+        job = daemon_mod.Daemon(db_path).build().get_job("league_refresh")
+        assert job.trigger.interval.total_seconds() == (
+            daemon_mod.LEAGUE_MINUTES * 60)
 
     def test_live_poll_is_on_a_sixty_second_beat(self, prepared):
         db_path, _ = prepared

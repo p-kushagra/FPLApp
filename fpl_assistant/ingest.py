@@ -20,6 +20,10 @@ def main() -> None:
     parser.add_argument("--news", action="store_true", help="news feeds -> search index")
     parser.add_argument("--history", action="store_true",
                         help="per-gameweek player history (powers the learning engine)")
+    parser.add_argument("--understat", action="store_true",
+                        help="Understat league aggregates, entity resolution "
+                             "and per-match fan-out (enrichment; the app works "
+                             "without it)")
     parser.add_argument("--xp", action="store_true",
                         help="recompute expected-points projections")
     parser.add_argument("--freeze", action="store_true",
@@ -30,10 +34,10 @@ def main() -> None:
     args = parser.parse_args()
 
     chosen = [args.fpl, args.team, args.top, args.news, args.history,
-              args.xp, args.freeze, args.calibrate, args.all]
+              args.understat, args.xp, args.freeze, args.calibrate, args.all]
     if not any(chosen):
         parser.error("choose at least one of --fpl --team --top --news "
-                     "--history --xp --freeze --calibrate --all")
+                     "--history --understat --xp --freeze --calibrate --all")
 
     cfg = load_config()
 
@@ -61,12 +65,40 @@ def main() -> None:
     # on every tick: capture refuses a gameweek that is already frozen, too
     # far out, or past its deadline (models/snapshot.py), so "run it with
     # every refresh" is the schedule -- no clever timing required.
-    if args.all or args.xp or args.freeze or args.calibrate:
+    if args.all or args.understat or args.xp or args.freeze or args.calibrate:
         from . import db as db_module
         from .jobs import tasks
 
         conn = db_module.connect(cfg.db_path)
         try:
+            if args.all or args.understat:
+                # League aggregates first: one request covers every player, so
+                # it is always cheaper than discovering the same numbers by
+                # fanning out. Resolution then decides who is worth fanning to.
+                league = tasks.ingest_understat_league(conn)
+                if not league.get("ok"):
+                    print(f"Understat unavailable: {league.get('reason')} "
+                          "- staying on FPL baseline stats.")
+                else:
+                    print(f"Understat league: {league['players']} players, "
+                          f"{league['teams']} teams.")
+                    resolved = tasks.resolve_entities(conn)
+                    print(f"Entities resolved: {resolved['resolved']}"
+                          f"/{resolved['total']} ({resolved['rate']:.0%}).")
+
+                    ids = [r["understat_id"] for r in conn.execute(
+                        "SELECT DISTINCT understat_id FROM entity_map "
+                        "WHERE understat_id IS NOT NULL")]
+                    matches = failed = 0
+                    for i in range(0, len(ids), tasks.UNDERSTAT_CHUNK):
+                        batch = ids[i:i + tasks.UNDERSTAT_CHUNK]
+                        out = tasks.understat_fanout(conn, understat_ids=batch)
+                        matches += out["matches"]
+                        failed += len(out["failed"])
+                        print(f"  ...{min(i + len(batch), len(ids))}/{len(ids)} "
+                              f"players, {matches} match rows", flush=True)
+                    print(f"Understat per-match: {matches} rows, {failed} failed.")
+
             if args.all or args.xp:
                 result = tasks.recompute_xp(conn)
                 print(f"xP recomputed: {result.get('projections', 0)} projections "

@@ -264,12 +264,116 @@ class TestUnderstatExtraction:
         assert res.quality is Quality.UNAVAILABLE
         assert res.data is None
 
-    def test_successful_scrape_is_cached(self, db):
-        session = FakeSession([FakeResponse(200, text=self.HTML)])
+    def test_successful_fetch_is_cached(self, db):
+        session = FakeSession([FakeResponse(200, json_data=LEAGUE_PAYLOAD)])
         src = understat.UnderstatSource(db, session)
         assert src.league_players(2025).quality is Quality.FRESH
         assert src.league_players(2025).quality is Quality.FRESH
         assert len(session.calls) == 1, "second read must come from cache"
+
+
+# --------------------------------------------------------------------------
+# The site moved its data out of the markup and behind AJAX endpoints. These
+# pin the transport that replaced the scrape.
+# --------------------------------------------------------------------------
+LEAGUE_PAYLOAD = {
+    "players": [{"id": "8260", "player_name": "Erling Haaland",
+                 "npxG": "25.75", "xA": "5.51", "team_title": "Manchester City"}],
+    "teams": {"71": {"id": "71", "title": "Aston Villa", "history": []}},
+    "dates": [{"id": "28778", "h": {"title": "Liverpool"}}],
+}
+
+PLAYER_PAYLOAD = {
+    "player": {"id": "8260", "name": "Erling Haaland"},
+    "matches": [{"id": "31190", "season": "2026", "h_team": "Crystal Palace",
+                 "a_team": "Manchester City", "time": "90", "npxG": "0.68"}],
+    "groups": {"season": [{"season": "2026", "team": "Manchester City"}]},
+    "shots": [{"id": "354876", "xG": "0.079"}],
+}
+
+
+class TestUnderstatApiTransport:
+    def test_the_ajax_header_is_sent(self, db):
+        """Every endpoint 404s without it. This header IS the fix."""
+        session = FakeSession([FakeResponse(200, json_data=LEAGUE_PAYLOAD)])
+        sent = {}
+
+        def get(url, timeout=None, headers=None):
+            session.calls.append(url)
+            sent.update(headers or {})
+            return FakeResponse(200, json_data=LEAGUE_PAYLOAD)
+
+        session.get = get
+        understat.UnderstatSource(db, session).league_players(2025)
+        assert sent.get(understat.AJAX_HEADER) == understat.AJAX_VALUE
+
+    def test_requests_use_the_understat_timeout(self, db):
+        session = FakeSession()
+        seen = {}
+
+        def get(url, timeout=None, headers=None):
+            seen["timeout"] = timeout
+            return FakeResponse(200, json_data=LEAGUE_PAYLOAD)
+
+        session.get = get
+        understat.UnderstatSource(db, session).league_players(2025)
+        assert seen["timeout"] == understat.TIMEOUT == 15.0
+
+    def test_league_endpoint_is_hit_not_the_html_page(self, db):
+        session = FakeSession([FakeResponse(200, json_data=LEAGUE_PAYLOAD)])
+        understat.UnderstatSource(db, session).league_players(2025)
+        assert session.calls == [
+            "https://understat.com/getLeagueData/EPL/2025"]
+
+    def test_players_and_teams_share_one_request(self, db):
+        """Both used to re-fetch the same page; one payload now carries both."""
+        session = FakeSession([FakeResponse(200, json_data=LEAGUE_PAYLOAD)])
+        src = understat.UnderstatSource(db, session)
+        players = src.league_players(2025)
+        teams = src.league_teams(2025)
+
+        assert players.data[0]["player_name"] == "Erling Haaland"
+        assert teams.data["71"]["title"] == "Aston Villa"
+        assert len(session.calls) == 1, "one fetch must serve both slices"
+
+    def test_player_matches_and_groups_share_one_request(self, db):
+        session = FakeSession([FakeResponse(200, json_data=PLAYER_PAYLOAD)])
+        src = understat.UnderstatSource(db, session)
+        assert src.player_matches("8260").data[0]["id"] == "31190"
+        assert src.player_groups("8260").data["season"][0]["team"] == "Manchester City"
+        assert src.player_shots("8260").data[0]["id"] == "354876"
+        assert len(session.calls) == 1
+
+    def test_match_endpoint(self, db):
+        payload = {"rosters": {"h": {}}, "shots": [{"id": "1"}], "tmpl": ""}
+        session = FakeSession([FakeResponse(200, json_data=payload)])
+        src = understat.UnderstatSource(db, session)
+        assert src.match_shots("28778").data == [{"id": "1"}]
+        assert session.calls == ["https://understat.com/getMatchData/28778"]
+
+    def test_a_missing_field_is_unavailable_not_a_silent_empty(self, db):
+        """A shape change must never look like 'this player has no shots'."""
+        session = FakeSession([FakeResponse(200, json_data={"teams": {}})])
+        res = understat.UnderstatSource(db, session).league_players(2025)
+        assert res.quality is Quality.UNAVAILABLE
+        assert res.data is None
+        assert "players" in (res.error or "")
+
+    def test_a_404_shell_page_does_not_parse_as_data(self, db):
+        """What the missing AJAX header actually returned: HTML, not JSON."""
+        session = FakeSession(
+            [FakeResponse(404, text="<html>error</html>")] * 3)
+        res = understat.UnderstatSource(db, session).league_players(2025)
+        assert res.quality is Quality.UNAVAILABLE
+
+    def test_select_names_the_fields_it_did_find(self, db):
+        with pytest.raises(Malformed) as exc:
+            understat.select({"teams": {}, "dates": []}, "players")
+        assert "teams" in str(exc.value) and "dates" in str(exc.value)
+
+    def test_select_rejects_a_non_object_payload(self):
+        with pytest.raises(Malformed):
+            understat.select([1, 2, 3], "players")
 
 
 # --------------------------------------------------------------------------

@@ -40,6 +40,16 @@ class Config:
     regions: dict = field(default_factory=dict)
     managers: dict = field(default_factory=dict)
     references: dict = field(default_factory=dict)
+    leagues: dict = field(default_factory=dict)
+
+    @property
+    def default_rival_count(self) -> int:
+        return int(self.leagues.get("default_rival_count") or 8)
+
+    @property
+    def max_rivals(self) -> int:
+        """Caps the per-gameweek freeze request budget."""
+        return int(self.leagues.get("max_rivals") or 20)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -66,6 +76,7 @@ def load_config() -> Config:
     regions = {int(k): v for k, v in (regions_raw.get("regions") or {}).items()}
     managers = _load_yaml(_resolve(_get("MANAGERS_PATH", "config/managers.yaml")))
     references = _load_yaml(_resolve(_get("REFERENCES_PATH", "config/references.yaml")))
+    leagues = _load_yaml(_resolve(_get("LEAGUES_PATH", "config/leagues.yaml")))
 
     team_id = _get("FPL_TEAM_ID")
 
@@ -85,4 +96,5 @@ def load_config() -> Config:
         regions=regions,
         managers=managers,
         references=references,
+        leagues=leagues,
     )

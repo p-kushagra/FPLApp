@@ -187,8 +187,9 @@ with subs_tab, error_boundary("Auto-subs", quality=quality):
 with threat_tab, error_boundary("Rank threat", quality=quality):
     if not state.threats:
         st.info(
-            "No rival data. Ingest a mini-league and freeze rival picks to "
-            "populate the ILEO threat meter.")
+            "No rival data. Open **Leagues & Rivals**, discover your "
+            "mini-leagues and save a rival set - their squads are frozen "
+            "after each deadline and populate this threat meter.")
     else:
         st.caption(
             "Swing is your multiplier minus the rivals' effective ownership; "

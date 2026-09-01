@@ -275,6 +275,17 @@ def build(conn: sqlite3.Connection, cfg, quality: DataQuality,
     squad, _squad_gw = current_squad(conn)
     rules = load_rules()
 
+    # An explicit rival set wins; otherwise fall back to the one saved on the
+    # Leagues & Rivals page. Without this the captaincy matrix silently showed
+    # a rival captain EO of 0% for everyone -- a Shield/Sword call computed
+    # against an empty field, which looks like data but is the absence of it.
+    if rival_ids is None:
+        try:
+            from .. import leagues as leagues_mod
+            rival_ids = leagues_mod.rival_ids(conn) or None
+        except sqlite3.Error:
+            rival_ids = None
+
     bank_row = conn.execute(
         "SELECT value FROM meta WHERE key = 'bank'").fetchone()
     bank = float(bank_row["value"]) if bank_row and bank_row["value"] else 0.0

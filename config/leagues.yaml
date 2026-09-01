@@ -1,8 +1,11 @@
-# Mini-leagues to track, and which rivals form the ILEO reference set.
-tracked: []
-  # - id: 123456
-  #   name: "Work league"
-  #   rivals: [1234567, 2345678]   # empty/absent = auto-select top N by rank
+# Mini-league settings.
+#
+# Which leagues you are in is NOT configured here. It is discovered from your
+# own FPL entry (`/entry/{FPL_TEAM_ID}/` -> leagues.classic) and stored in the
+# `league` table, so joining a new league needs no edit to this file. Track or
+# untrack them, and choose the rival set, on the Leagues & Rivals page.
+#
+# Only the tuning knobs live here.
 
-default_rival_count: 8
-max_rivals: 20          # caps the per-GW freeze request budget
+default_rival_count: 8   # rivals auto-selected by rank when none are chosen
+max_rivals: 20           # caps the per-GW freeze request budget

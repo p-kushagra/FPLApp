@@ -27,7 +27,8 @@ PAGE2 = str(PROJECT_ROOT / "pages" / "2_Command_Center.py")
 PAGE_SCHEDULE = str(PROJECT_ROOT / "pages" / "1_Schedule_and_Congestion.py")
 PAGE_LIVE = str(PROJECT_ROOT / "pages" / "3_Live_Matchday.py")
 PAGE_SQUAD = str(PROJECT_ROOT / "pages" / "4_Squad_and_News.py")
-ALL_PAGES = [PAGE1, PAGE2, PAGE_SCHEDULE, PAGE_LIVE, PAGE_SQUAD]
+PAGE_LEAGUES = str(PROJECT_ROOT / "pages" / "5_Leagues_and_Rivals.py")
+ALL_PAGES = [PAGE1, PAGE2, PAGE_SCHEDULE, PAGE_LIVE, PAGE_SQUAD, PAGE_LEAGUES]
 
 
 @pytest.fixture
@@ -130,7 +131,15 @@ class TestPagesMount:
         _assert_clean(app, page)
         text = " ".join(str(m.value) for m in app.markdown) + \
                " ".join(str(c.value) for c in app.caption)
-        assert "No data yet" in text or "Refresh Config" in text, (
+        # Each page names whichever action actually fills it. For the decision
+        # pages that is an ingest on Refresh Config; for Leagues & Rivals the
+        # database is not what is empty -- the league list is -- so it names
+        # discovery, or the team id that discovery needs when that is missing
+        # too. Which of the two it shows depends on whether FPL_TEAM_ID is set,
+        # so both belong here.
+        actions = ("No data yet", "Refresh Config", "Discover my leagues",
+                   "FPL_TEAM_ID")
+        assert any(a in text for a in actions), (
             "empty database must name the action that fixes it")
 
     def test_page1_renders_the_kpi_row(self, seeded_db):
@@ -202,9 +211,10 @@ class TestPagesMount:
         assert swapped or held, (
             "each pathway card must show swap badges or an explicit hold")
 
-    def test_the_consolidated_page_set_is_exactly_five(self):
-        """v1's eleven pages collapsed to four decision pages plus the
-        retrospective. Anything else in pages/ is an accident."""
+    def test_the_consolidated_page_set_is_exactly_six(self):
+        """v1's eleven pages collapsed to four decision pages, plus the
+        retrospective and the rival-sourcing surface the ILEO analytics on
+        every one of them depend on. Anything else in pages/ is an accident."""
         found = sorted(p.name for p in (PROJECT_ROOT / "pages").glob("*.py"))
         assert found == [
             "0_Gameweek_Summary.py",
@@ -212,6 +222,7 @@ class TestPagesMount:
             "2_Command_Center.py",
             "3_Live_Matchday.py",
             "4_Squad_and_News.py",
+            "5_Leagues_and_Rivals.py",
         ], found
 
     def test_archived_v1_pages_are_not_loaded_by_streamlit(self):

@@ -41,6 +41,8 @@ FREEZE_CHECK_MINUTES = 10
 PRICE_SNAPSHOT_MINUTES = 60
 REFERENCE_REFRESH_MINUTES = 180
 XP_RECOMPUTE_MINUTES = 120
+MINI_LEAGUE_MINUTES = 360
+RIVAL_FREEZE_MINUTES = 20
 
 _SCHEDULER: Any = None
 _LOCK = threading.Lock()
@@ -176,7 +178,13 @@ def start(db_path: Path, *, freeze_minutes: int = FREEZE_CHECK_MINUTES,
                     ("refresh_reference", REFERENCE_REFRESH_MINUTES,
                      "Bootstrap, fixtures and gameweek state"),
                     ("recompute_xp", XP_RECOMPUTE_MINUTES,
-                     "Expected-points projection")):
+                     "Expected-points projection"),
+                    ("ingest_mini_league", MINI_LEAGUE_MINUTES,
+                     "Mini-league standings"),
+                    # Gated on the deadline having passed and idempotent per
+                    # entry, so a frequent tick is free outside a live gameweek.
+                    ("freeze_rivals", RIVAL_FREEZE_MINUTES,
+                     "Rival squad freeze (post-deadline)")):
                 scheduler.add_job(
                     _run_task, IntervalTrigger(minutes=minutes),
                     args=[db_path, job_id], id=job_id, name=label,

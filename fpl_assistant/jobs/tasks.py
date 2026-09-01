@@ -12,9 +12,11 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import sqlite3
+import time
 from collections.abc import Callable
 from typing import Any
 
+from .. import leagues as leagues_mod
 from .. import temporal
 from ..models import calibration
 from ..models import snapshot as snapshot_mod
@@ -32,6 +34,10 @@ Progress = Callable[[float, str], None]
 
 UNDERSTAT_CHUNK = 25   # players per fan-out job; isolates failures
 SEASON_FALLBACK = 2025
+
+# Courtesy pause between per-player Understat fetches, on top of the token
+# bucket. Enrichment is never on anyone's critical path.
+PLAYER_FETCH_PAUSE = 0.5
 
 
 def _noop(progress: float, note: str = "") -> None:
@@ -220,18 +226,47 @@ def understat_fanout(conn: sqlite3.Connection, progress: Progress = _noop,
 
     fixtures = _fixture_date_index(conn)
     total_matches = 0
+    total_shots = 0
     failures: list[str] = []
     now = _now()
 
     for i, uid in enumerate(ids):
         progress(i / max(1, len(ids)), f"understat player {uid}")
-        result = src.player_matches(str(uid))
-        if not result.usable:
+
+        # Courtesy gap between players, on top of the token bucket. Understat
+        # is a small volunteer-run site and this is enrichment, not something
+        # anyone is waiting on.
+        if i:
+            time.sleep(PLAYER_FETCH_PAUSE)
+
+        # One fetch serves both: `matches` has no home/away flag of its own, so
+        # the player's club per season -- which only `groups` carries -- is what
+        # makes the side derivable at all.
+        payload = src.player_data(str(uid))
+        if not payload.usable:
             failures.append(str(uid))
             continue
 
-        for m in result.data or []:
+        matches = (payload.data or {}).get("matches") or []
+        teams_by_season = _teams_by_season((payload.data or {}).get("groups"))
+        total_shots += _store_shots(conn, str(uid),
+                                    (payload.data or {}).get("shots"), now)
+
+        for m in matches:
             gw = _match_to_gw(conn, m, fixtures)
+            home, away = m.get("h_team"), m.get("a_team")
+            mine = teams_by_season.get(_int(m.get("season")), set())
+
+            # Which side was this player on? Whichever club is theirs that
+            # season. A transfer inside one season leaves both in the set, so
+            # an unresolvable match records NULL rather than a coin flip.
+            if home in mine and away not in mine:
+                is_home, team, opponent = 1, home, away
+            elif away in mine and home not in mine:
+                is_home, team, opponent = 0, away, home
+            else:
+                is_home, team, opponent = None, None, None
+
             conn.execute(
                 """INSERT OR REPLACE INTO understat_player_match
                      (understat_id, match_id, season, match_date, team_title,
@@ -240,8 +275,7 @@ def understat_fanout(conn: sqlite3.Connection, progress: Progress = _noop,
                       fpl_gw, fetched_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (str(uid), str(m.get("id")), _int(m.get("season")), m.get("date"),
-                 m.get("h_team"), m.get("a_team"),
-                 1 if (m.get("h_a") or "").lower() == "h" else 0,
+                 team, opponent, is_home,
                  _int(m.get("time")), m.get("position"), _int(m.get("goals")),
                  _int(m.get("assists")), _int(m.get("shots")),
                  _int(m.get("key_passes")), _f(m.get("xG")), _f(m.get("xA")),
@@ -255,7 +289,8 @@ def understat_fanout(conn: sqlite3.Connection, progress: Progress = _noop,
         _flag_understat_offline(conn, f"all {len(ids)} players failed")
 
     return {"ok": True, "players": len(ids) - len(failures),
-            "matches": total_matches, "failed": failures}
+            "matches": total_matches, "shots": total_shots,
+            "failed": failures}
 
 
 def resolve_entities(conn: sqlite3.Connection, progress: Progress = _noop,
@@ -366,30 +401,77 @@ def calibrate(conn: sqlite3.Connection, progress: Progress = _noop,
 # --------------------------------------------------------------------------
 # DAG-C: mini-league freeze
 # --------------------------------------------------------------------------
+def discover_leagues(conn: sqlite3.Connection, progress: Progress = _noop,
+                     team_id: int = 0, **_: Any) -> dict:
+    """Read the manager's own mini-league memberships from `/entry/{id}/`.
+
+    This is the step that was missing: every other league table and every ILEO
+    surface was already built, but no code path ever produced a league id, so
+    they all rendered their empty state permanently.
+    """
+    if not team_id:
+        from ..config import load_config
+        team_id = load_config().fpl_team_id or 0
+
+    progress(0.3, "reading league memberships")
+    return leagues_mod.discover(conn, int(team_id))
+
+
 def ingest_mini_league(conn: sqlite3.Connection, progress: Progress = _noop,
                        league_id: int = 0, limit: int = 50, **_: Any) -> dict:
-    """Standings for one classic league."""
-    src = FplSource(conn)
-    progress(0.3, f"fetching league {league_id}")
-    result = src.league_entries(league_id, limit=limit)
-    if not result.usable:
-        return {"ok": False, "quality": result.quality.value, "entries": 0}
+    """Standings for one classic league, or every tracked league.
 
+    A league_id of 0 means "whatever the user is tracking", which is what lets
+    the daemon run this on a schedule without anything hard-coded.
+    """
+    targets = [int(league_id)] if league_id else leagues_mod.tracked_ids(conn)
+    if not targets:
+        return {"ok": False, "reason": "no tracked leagues", "entries": 0,
+                "leagues": 0}
+
+    src = FplSource(conn)
     gw = temporal.gw_state(conn).scoring_gw
     now = _now()
-    for row in result.data or []:
+    total = 0
+    partial = False
+    done: list[int] = []
+
+    for i, lid in enumerate(targets):
+        progress(i / max(1, len(targets)), f"fetching league {lid}")
+        result = src.league_entries(lid, limit=limit)
+        if not result.usable:
+            continue
+        rows = result.data or []
+        for row in rows:
+            conn.execute(
+                """INSERT OR REPLACE INTO league_standing
+                     (league_id, gw, entry_id, player_name, entry_name, rank,
+                      last_rank, event_total, total, is_rival, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           COALESCE((SELECT is_rival FROM league_standing
+                                     WHERE league_id = ? AND entry_id = ?
+                                     ORDER BY gw DESC LIMIT 1), 0), ?)""",
+                (lid, gw, row.get("entry"), row.get("player_name"),
+                 row.get("entry_name"), row.get("rank"), row.get("last_rank"),
+                 row.get("event_total"), row.get("total"),
+                 lid, row.get("entry"), now),
+            )
+        # Size is what distinguishes a work league from a public free-for-all;
+        # it decides which league the rival-facing pages default to.
         conn.execute(
-            """INSERT OR REPLACE INTO league_standing
-                 (league_id, gw, entry_id, player_name, entry_name, rank,
-                  last_rank, event_total, total, fetched_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (league_id, gw, row.get("entry"), row.get("player_name"),
-             row.get("entry_name"), row.get("rank"), row.get("last_rank"),
-             row.get("event_total"), row.get("total"), now),
-        )
+            """INSERT INTO league (league_id, entry_count, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(league_id) DO UPDATE SET
+                 entry_count = excluded.entry_count,
+                 updated_at = excluded.updated_at""",
+            (lid, len(rows), now))
+        total += len(rows)
+        partial = partial or result.quality.is_degraded
+        done.append(lid)
+
     conn.commit()
-    return {"ok": True, "entries": len(result.data or []),
-            "partial": result.quality.is_degraded, "gw": gw}
+    return {"ok": bool(done), "entries": total, "leagues": len(done),
+            "league_ids": done, "partial": partial, "gw": gw}
 
 
 def freeze_rivals(conn: sqlite3.Connection, progress: Progress = _noop,
@@ -409,13 +491,20 @@ def freeze_rivals(conn: sqlite3.Connection, progress: Progress = _noop,
         return {"ok": False, "reason": "deadline has not passed", "frozen": 0,
                 "phase": state.phase.value}
 
-    rivals = rival_ids or [
-        r["entry_id"] for r in conn.execute(
-            """SELECT entry_id FROM league_standing
-               WHERE league_id = ? AND is_rival = 1""",
-            (league_id,),
-        )
-    ]
+    if rival_ids:
+        rivals = [int(r) for r in rival_ids]
+    elif league_id:
+        # A tracked league with no curated rival set still gets a usable
+        # default rather than an empty ILEO nobody knows how to populate.
+        rivals = leagues_mod.ensure_rivals(
+            conn, league_id, exclude_entry=_my_entry_id())
+    else:
+        rivals = []
+        for lid in leagues_mod.tracked_ids(conn):
+            rivals.extend(leagues_mod.ensure_rivals(
+                conn, lid, exclude_entry=_my_entry_id()))
+        rivals = sorted(set(rivals))
+
     if not rivals:
         return {"ok": False, "reason": "no rivals selected", "frozen": 0}
 
@@ -456,7 +545,10 @@ def freeze_rivals(conn: sqlite3.Connection, progress: Progress = _noop,
 
     conn.commit()
 
-    matrix = eo_mod.swing_matrix(conn, target_gw, rivals, league_id=league_id)
+    # `ileo_cache` keys on league_id, so a fan-out across every tracked league
+    # is attributed to the primary one rather than to a meaningless 0.
+    attributed = league_id or leagues_mod.default_league(conn) or 0
+    matrix = eo_mod.swing_matrix(conn, target_gw, rivals, league_id=attributed)
     written = eo_mod.persist_ileo(conn, matrix)
 
     return {"ok": True, "gw": target_gw, "frozen": frozen, "skipped": skipped,
@@ -540,6 +632,15 @@ def degradation_state(conn: sqlite3.Connection) -> dict:
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
+def _my_entry_id() -> int | None:
+    """Own team id, so auto-selection never makes you your own rival."""
+    try:
+        from ..config import load_config
+        return load_config().fpl_team_id
+    except Exception:
+        return None
+
+
 def _f(value, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -552,6 +653,55 @@ def _int(value, default: int = 0) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def _store_shots(conn: sqlite3.Connection, understat_id: str, shots: Any,
+                 now: str) -> int:
+    """Persist a player's shot events. Rides along on the fan-out's payload.
+
+    Understat returns every shot of a player's career, not just this season, so
+    the rows are keyed on the shot id and replaced rather than appended -- a
+    re-ingest must not double a striker's shot map.
+    """
+    rows = []
+    for s in shots or []:
+        shot_id = s.get("id")
+        if shot_id is None:
+            continue
+        rows.append((
+            str(shot_id), understat_id, str(s.get("match_id") or ""),
+            _int(s.get("season")), _int(s.get("minute")),
+            _f(s.get("X")), _f(s.get("Y")), _f(s.get("xG")),
+            s.get("result"), s.get("situation"), s.get("shotType"),
+            s.get("lastAction"), s.get("h_team"), s.get("a_team"),
+            s.get("h_a"), s.get("player_assisted"), s.get("date"), now,
+        ))
+
+    if rows:
+        conn.executemany(
+            """INSERT OR REPLACE INTO understat_shot
+                 (shot_id, understat_id, match_id, season, minute, x, y, xg,
+                  result, situation, shot_type, last_action, h_team, a_team,
+                  h_a, player_assisted, match_date, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows)
+    return len(rows)
+
+
+def _teams_by_season(groups: Any) -> dict[int, set[str]]:
+    """{season: {clubs the player turned out for}} from the `groups` payload.
+
+    The per-match rows carry both clubs but not which one was the player's, so
+    this is the only thing that makes home/away recoverable. A mid-season
+    transfer legitimately yields two clubs for one season; callers treat that
+    as unresolvable rather than guessing.
+    """
+    out: dict[int, set[str]] = {}
+    for row in ((groups or {}).get("season") or []):
+        team = row.get("team")
+        if team:
+            out.setdefault(_int(row.get("season")), set()).add(team)
+    return out
 
 
 def _fixture_date_index(conn: sqlite3.Connection) -> list[dict]:
@@ -624,6 +774,7 @@ REGISTRY: dict[str, Callable] = {
     "recompute_xp": recompute_xp,
     "freeze_projections": freeze_projections,
     "calibrate": calibrate,
+    "discover_leagues": discover_leagues,
     "ingest_mini_league": ingest_mini_league,
     "freeze_rivals": freeze_rivals,
     "poll_live": poll_live,

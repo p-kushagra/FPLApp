@@ -164,29 +164,73 @@ with shots_tab, error_boundary("Shot maps", quality=quality):
             "Understat is offline - shot coordinates are unavailable and "
             "the xP model is running on FPL baseline stats.", "warn")
 
-    shot_rows = []
-    try:
-        shot_rows = [dict(r) for r in conn.execute(
-            """SELECT * FROM understat_player_match LIMIT 1""")]
-    except Exception:
-        shot_rows = []
+    # Only squad and watchlist players are offered: the selector exists to
+    # answer "where is my striker shooting from", not to browse 537 names.
+    shooters = [dict(r) for r in conn.execute(
+        """SELECT p.id, p.web_name, p.understat_id, COUNT(s.shot_id) n
+           FROM players p
+           JOIN understat_shot s ON s.understat_id = p.understat_id
+           WHERE p.understat_id IS NOT NULL
+           GROUP BY p.id HAVING n > 0
+           ORDER BY p.web_name""")]
 
-    if not shot_rows:
+    if not shooters:
         st.plotly_chart(charts.shot_map([]), width="stretch")
         st.info(
-            "No Understat data has been ingested. When Understat is "
-            "reachable, run the Understat jobs and resolve entities; the "
-            "map populates automatically.")
+            "No shot data ingested yet. Run "
+            "`python -m fpl_assistant.ingest --understat` — it resolves "
+            "entities and stores per-shot coordinates alongside the "
+            "per-match rows.")
     else:
-        names = {int(r["id"]): r["web_name"] for r in conn.execute(
-            "SELECT id, web_name FROM players WHERE understat_id IS NOT NULL")}
-        if names:
-            chosen = st.selectbox("Player", list(names),
-                                  format_func=lambda i: names[i])
-            st.plotly_chart(charts.shot_map([], title=names[chosen]),
-                            width="stretch")
-        else:
-            st.info("No players are resolved to Understat ids yet.")
+        owned = {int(r["player_id"]) for r in conn.execute(
+            "SELECT player_id FROM my_picks WHERE gw = ?", (squad_gw,))
+        } if squad_gw is not None else set()
+        squad_first = [s for s in shooters if int(s["id"]) in owned]
+        pool = squad_first or shooters
+        labels = {int(s["id"]): f"{s['web_name']} ({s['n']})" for s in pool}
+        by_id = {int(s["id"]): s for s in pool}
+
+        left, right = st.columns([2, 1])
+        chosen = left.selectbox("Player", list(labels),
+                                format_func=lambda i: labels[i])
+        seasons = [r["season"] for r in conn.execute(
+            "SELECT DISTINCT season FROM understat_shot WHERE understat_id = ?"
+            " ORDER BY season DESC", (by_id[chosen]["understat_id"],))]
+        season = right.selectbox("Season", ["All"] + seasons)
+
+        sql = ("SELECT x, y, xg, result, minute, situation, h_team, a_team, h_a"
+               " FROM understat_shot WHERE understat_id = ?")
+        params: list = [by_id[chosen]["understat_id"]]
+        if season != "All":
+            sql += " AND season = ?"
+            params.append(season)
+
+        shots = []
+        for r in conn.execute(sql, params):
+            # The opponent is whichever club the shooter was not playing for.
+            opponent = r["a_team"] if (r["h_a"] or "").lower() == "h" else r["h_team"]
+            shots.append(charts.Shot(
+                x=float(r["x"] or 0), y=float(r["y"] or 0),
+                xg=float(r["xg"] or 0), result=r["result"] or "MissedShots",
+                minute=r["minute"], situation=r["situation"] or "",
+                opponent=opponent or ""))
+
+        st.plotly_chart(
+            charts.shot_map(shots, title=by_id[chosen]["web_name"]),
+            width="stretch")
+
+        goals = [s for s in shots if s.is_goal]
+        total_xg = sum(s.xg for s in shots)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Shots", len(shots))
+        m2.metric("Goals", len(goals))
+        m3.metric("xG", f"{total_xg:.2f}")
+        m4.metric("Goals − xG", f"{len(goals) - total_xg:+.2f}",
+                  help="Positive means finishing above the chance quality. "
+                       "Regresses hard; treat a big number as noise, not skill.")
+        if not squad_first:
+            st.caption("No squad player has stored shots yet — showing every "
+                       "resolved player.")
 
 # --- radar -----------------------------------------------------------------
 with radar_tab, error_boundary("Rival radar", quality=quality):
@@ -244,8 +288,9 @@ with radar_tab, error_boundary("Rival radar", quality=quality):
 
         if len(series) == 1:
             st.info(
-                "No rival squads frozen for this gameweek. Ingest a "
-                "mini-league to compare - showing your squad alone.")
+                "No rival squads frozen for this gameweek. Pick a rival set on "
+                "**Leagues & Rivals** - they are captured after each deadline. "
+                "Showing your squad alone.")
         st.plotly_chart(charts.radar(series), width="stretch")
         dataframe([{"Squad": k, **v} for k, v in series.items()])
 

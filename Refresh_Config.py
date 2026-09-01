@@ -24,12 +24,43 @@ st.caption("Control panel for the FPL Squad Assistant — pull fresh data, then 
            "that every source behind it is still alive. Data stays on this machine.")
 
 # --- status ---------------------------------------------------------------
+# `st.metric` renders its value at ~2.25rem and does not wrap. An ISO timestamp
+# truncated to 16 characters ("2026-09-01T12:34") overflows that in a
+# five-column row and silently clips mid-value, so the one number the operator
+# came to read -- when the data was last pulled -- is the one they cannot see.
+# Shrinking the value slot and wrapping it is enough; the timestamps are also
+# reformatted into something human below.
+st.markdown(
+    """<style>
+    div[data-testid="stMetricValue"] {
+        font-size: 1.35rem;
+        line-height: 1.25;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    div[data-testid="stMetricLabel"] { font-size: .82rem; }
+    </style>""",
+    unsafe_allow_html=True,
+)
+
+
+def _stamp(value: str | None) -> str:
+    """ISO timestamp -> '01 Sep 14:32'. Falls back to whatever it was given."""
+    if not value:
+        return "never"
+    try:
+        when = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)[:16]
+    return when.strftime("%d %b %H:%M")
+
+
 feed_count = len(news_fetch.normalize_sources(cfg.sources.get("rss", []) or []))
 
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Current GW", get_meta(conn, "current_gw", "—"))
-col2.metric("FPL updated", (get_meta(conn, "fpl_last_ingest", "never") or "never")[:16])
-col3.metric("News updated", (get_meta(conn, "news_last_ingest", "never") or "never")[:16])
+col2.metric("FPL updated", _stamp(get_meta(conn, "fpl_last_ingest", None)))
+col3.metric("News updated", _stamp(get_meta(conn, "news_last_ingest", None)))
 col4.metric("News sources", feed_count)
 col5.metric("Insights", cfg.insights_provider or "null")
 
@@ -43,7 +74,26 @@ st.divider()
 st.subheader("Refresh data")
 st.write("Pull the latest from the FPL API and news sources. Safe to run repeatedly.")
 
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+
+if c6.button("⑥ Mini-leagues", width="stretch",
+             disabled=cfg.fpl_team_id is None,
+             help="Reads every mini-league you are in from your own FPL entry, "
+                  "then refreshes their standings. Choose rivals on the "
+                  "Leagues & Rivals page."):
+    from fpl_assistant import leagues as leagues_mod
+    from fpl_assistant.jobs import tasks as jobs_tasks
+
+    with st.spinner("Discovering your mini-leagues…"):
+        found = leagues_mod.discover(conn, cfg.fpl_team_id)
+        standings = (jobs_tasks.ingest_mini_league(conn)
+                     if found.get("ok") else {})
+    if found.get("ok"):
+        st.success(f"Found {found['leagues']} league(s); loaded "
+                   f"{standings.get('entries', 0)} standing(s) from "
+                   f"{standings.get('leagues', 0)} tracked league(s).")
+    else:
+        st.error(f"Could not read your leagues: {found.get('reason')}")
 
 if c1.button("① FPL data", width="stretch"):
     with st.spinner("Fetching players, teams, fixtures…"):
@@ -122,20 +172,19 @@ if c2.button("🧹 Tidy stored news", width="stretch",
 st.divider()
 st.subheader("Pages")
 st.markdown(
-    "- **My Squad** — ownership, fixtures, availability and rotation badges.\n"
-    "- **News Feed** — per-player chatter with optional Claude insight.\n"
-    "- **Transfer Market** — most transferred in/out, price watch.\n"
-    "- **Template & Differentials** — what the elite own vs low-owned form picks.\n"
-    "- **Captaincy** — ranked captain options: expected points per match times the "
-    "number of matches, adjusted for head-to-head record and rotation risk.\n"
-    "- **Rotation & Congestion** — fixture pile-ups, AFCON, European midweeks.\n"
-    "- **Squad Briefing** — one batched AI request for the whole squad.\n"
-    "- **Squad Intelligence** — predicted XI, key-player impact, injury knock-on, "
-    "comebacks and new signings, learned from gameweek history.\n"
-    "- **Role Arbitrage** — players deployed further forward than FPL lists them, "
-    "and how long that window stays open.\n"
-    "- **Fixture Planner** — blank and double gameweeks (confirmed and projected "
-    "from the cup calendar), fixture runs and chip timing."
+    "- **Gameweek Summary** — where your rank actually came from: the ILEO "
+    "swing matrix against named rivals, luck vs process, bench and auto-subs.\n"
+    "- **Schedule & Congestion** — FDR heatmap, budget rotation pairs, and "
+    "European fixture pile-ups with under-72h rest.\n"
+    "- **Command Center** — prescriptive transfer pathways, the Shield/Sword "
+    "captaincy matrix, transfer-market momentum and role arbitrage.\n"
+    "- **Live Matchday** — provisional bonus, formation-legal auto-sub "
+    "simulation and the live ILEO rank threat meter.\n"
+    "- **Squad & News** — interactive formation pitch, shot maps, rival radar "
+    "and the curated squad news feed.\n"
+    "- **Leagues & Rivals** — discovers every mini-league you are in from your "
+    "FPL entry and sets the rival field that all ILEO analysis is measured "
+    "against."
 )
 
 st.info(

@@ -97,6 +97,50 @@ python -m fpl_assistant.ingest --all
 streamlit run Refresh_Config.py
 ```
 
+## Mini-leagues and rivals
+
+Nothing to type in. Your leagues are read from your own entry
+(`/entry/{FPL_TEAM_ID}/` → `leagues.classic`), so joining a new league needs no
+config edit — press **Discover my leagues** on the **Leagues & Rivals** page, or
+let the daemon do it on its six-hourly pass.
+
+- **Private leagues are tracked automatically.** FPL also enrols you in Overall,
+  a country, a region and a club league; those are listed but left untracked,
+  because ILEO over seven million entries is just global ownership with extra
+  steps. Toggle any of them on if you want them.
+- **Rivals default to the top of the table** — the managers you can still
+  overtake — capped by `max_rivals` in `config/leagues.yaml`. Override the set
+  per league and it persists across weekly standings refreshes.
+- **Rival squads are frozen after each deadline**, because picks are hidden
+  until the lock. The daemon polls every 20 minutes and skips anyone already
+  captured, so a gameweek is caught whenever the machine happens to be awake.
+  A deadline that passes with the daemon down cannot be back-filled.
+
+This is what feeds the ILEO swing matrix, the live rank threat meter, the rival
+radar and the Shield/Sword captaincy regime. Without a rival set those panels
+have nothing to measure against and say so.
+
+## Understat enrichment
+
+Understat supplies the underlying numbers (npxG, xA, xGChain) that sharpen the
+xP model. It is **enrichment, never a hard dependency** — when it is unreachable
+the app falls back to FPL's own `expected_goals`/`expected_assists` and shows an
+`Understat Offline — Using Baseline Stats` badge.
+
+Check connectivity at any time:
+
+```powershell
+python scripts/check_understat.py --matches
+python -m fpl_assistant.ingest --understat    # league + resolve + per-match
+```
+
+The site does not inline its data in the page HTML any more; it serves JSON from
+the endpoints its own front-end calls (`getLeagueData`, `getPlayerData`,
+`getMatchData`). Those require the header `X-Requested-With: XMLHttpRequest` and
+return a 404 error page without it. There is no bot protection involved — the
+User-Agent is irrelevant — so if this breaks again, check the endpoint shape
+before reaching for a scraping workaround.
+
 ## Porting to another device
 
 This device may not be where the app runs. Full, step-by-step instructions for setting it
@@ -120,6 +164,7 @@ fpl_assistant/             Core package
   planner.py               Blank/double gameweeks, fixture runs, captaincy, chips
   insights/                Pluggable AI: Null (offline) + Claude subscription
   ingest.py                CLI: python -m fpl_assistant.ingest --all
+  leagues.py               Mini-league discovery + rival selection
 config/sources.yaml        News feeds (editable)
 data/                      SQLite DB (git-ignored, regenerated locally)
 ```

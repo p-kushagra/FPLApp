@@ -59,6 +59,16 @@ PRICE_HOUR_UTC, PRICE_MINUTE_UTC = 1, 15
 # Reference data (deadlines, fixtures, bootstrap) refresh cadence.
 REFERENCE_MINUTES = 180
 
+# Mini-league discovery and standings. Slow-moving: memberships change when the
+# user joins a league, standings only after a gameweek settles.
+LEAGUE_MINUTES = 360
+
+# Rival squad freeze. Runs often and is gated + idempotent rather than armed at
+# an exact moment: rival picks only become readable AFTER the deadline, and the
+# window to capture them before they matter is the whole live gameweek. An
+# entry already frozen is skipped, so a frequent tick costs nothing.
+RIVAL_FREEZE_MINUTES = 20
+
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUPS = 5
 
@@ -294,6 +304,22 @@ class Daemon:
         """Bootstrap, fixtures and gameweek deadlines."""
         self.run_job("refresh_reference")
 
+    def league_refresh(self) -> None:
+        """Discover the manager's mini-leagues, then refresh their standings."""
+        self.run_job("discover_leagues")
+        self.run_job("ingest_mini_league")
+
+    def rival_freeze(self) -> None:
+        """Capture rival squads once the deadline has passed.
+
+        The counterpart to the projection freeze, and the reason it cannot share
+        that timer: a rival's picks are hidden until the deadline locks, so this
+        one has to fire *after* the moment the other fires an hour before.
+        """
+        result = self.run_job("freeze_rivals")
+        if result and not result.get("ok"):
+            log.debug("rival freeze skipped: %s", result.get("reason"))
+
     # -- lifecycle --------------------------------------------------------
     def build(self):
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -328,6 +354,16 @@ class Daemon:
             id="reference_refresh", name="Reference data refresh",
             next_run_time=dt.datetime.now(dt.timezone.utc)
             + dt.timedelta(seconds=20))
+
+        scheduler.add_job(
+            self.league_refresh, IntervalTrigger(minutes=LEAGUE_MINUTES),
+            id="league_refresh", name="Mini-league discovery and standings",
+            next_run_time=dt.datetime.now(dt.timezone.utc)
+            + dt.timedelta(seconds=40))
+
+        scheduler.add_job(
+            self.rival_freeze, IntervalTrigger(minutes=RIVAL_FREEZE_MINUTES),
+            id="rival_freeze", name="Rival squad freeze (post-deadline)")
 
         self.scheduler = scheduler
         return scheduler
@@ -471,6 +507,8 @@ def main(argv: list[str] | None = None) -> int:
         daemon.matchday_poll()
         daemon.supervise_deadline()
         daemon.price_monitor()
+        daemon.league_refresh()
+        daemon.rival_freeze()
         print(f"done - see {db_path.parent / 'daemon.log'}")
         return 0
 

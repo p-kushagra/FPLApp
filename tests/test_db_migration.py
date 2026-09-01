@@ -44,7 +44,9 @@ class TestFreshDatabase:
         assert not (set(V1_TABLES) - present)
 
     def test_stamps_the_version(self, db):
-        assert db_module.schema_version(db) == db_module.SCHEMA_VERSION == 4
+        # The literal is deliberate: it is the "did you mean to bump this?"
+        # guard, and the only place the expected version is written down twice.
+        assert db_module.schema_version(db) == db_module.SCHEMA_VERSION == 5
 
     def test_adds_v2_columns_to_v1_tables(self, db):
         players = {r["name"] for r in db.execute("PRAGMA table_info(players)")}
@@ -74,12 +76,12 @@ class TestIdempotence:
 
         conn = db_module.connect(db_path)
         assert _tables(conn) == before
-        assert db_module.schema_version(conn) == 4
+        assert db_module.schema_version(conn) == db_module.SCHEMA_VERSION
         conn.close()
 
     def test_migrate_on_a_current_database_changes_nothing(self, db):
-        assert db_module.migrate(db) == 4
-        assert db_module.migrate(db) == 4
+        assert db_module.migrate(db) == db_module.SCHEMA_VERSION
+        assert db_module.migrate(db) == db_module.SCHEMA_VERSION
 
 
 class TestUpgradeFromV1:
@@ -106,7 +108,7 @@ class TestUpgradeFromV1:
         row = conn.execute("SELECT * FROM player_gw WHERE player_id=1").fetchone()
         assert row["total_points"] == 13
         assert db_module.get_meta(conn, "current_gw") == "7"
-        assert db_module.schema_version(conn) == 4
+        assert db_module.schema_version(conn) == db_module.SCHEMA_VERSION
         conn.close()
 
     def test_upgrade_writes_a_backup(self, db_path):
@@ -210,7 +212,7 @@ class TestUpgradeFromV2:
             "SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"projection_snapshot", "projection_snapshot_meta",
                 "calibration_run", "calibration_fit"} <= names
-        assert db_module.schema_version(conn) == 4
+        assert db_module.schema_version(conn) == db_module.SCHEMA_VERSION
         conn.close()
 
     def test_existing_rows_survive_the_upgrade(self, db_path):
@@ -243,7 +245,7 @@ class TestUpgradeFromV2:
         db_module.init_db(db_path)
         db_module.init_db(db_path)
         conn = db_module.connect(db_path)
-        assert db_module.schema_version(conn) == 4
+        assert db_module.schema_version(conn) == db_module.SCHEMA_VERSION
         conn.close()
 
 
@@ -275,7 +277,7 @@ class TestUpgradeToV4:
             "SELECT name FROM sqlite_master WHERE type='view'")}
         assert "historical_player_baselines" in tables
         assert "pre_gw_projections" in views
-        assert db_module.schema_version(conn) == 4
+        assert db_module.schema_version(conn) == db_module.SCHEMA_VERSION
         conn.close()
 
     def test_view_mirrors_the_snapshot_table(self, db_path):
@@ -303,5 +305,30 @@ class TestUpgradeToV4:
         db_module.init_db(db_path)
         db_module.init_db(db_path)
         conn = db_module.connect(db_path)
-        assert db_module.schema_version(conn) == 4
+        assert db_module.schema_version(conn) == db_module.SCHEMA_VERSION
         conn.close()
+
+
+# ==========================================================================
+class TestUpgradeToV5:
+    """Per-shot coordinates, added when Understat moved to JSON endpoints."""
+
+    def test_the_shot_table_exists(self, db):
+        cols = {r[1] for r in db.execute("PRAGMA table_info(understat_shot)")}
+        assert {"shot_id", "understat_id", "x", "y", "xg", "result",
+                "situation", "season"} <= cols
+
+    def test_shot_id_is_the_primary_key(self, db):
+        import sqlite3 as _sq
+        db.execute("INSERT INTO understat_shot (shot_id, understat_id)"
+                   " VALUES ('1', '8260')")
+        with pytest.raises(_sq.IntegrityError):
+            db.execute("INSERT INTO understat_shot (shot_id, understat_id)"
+                       " VALUES ('1', '8260')")
+
+    def test_replace_is_how_a_reingest_stays_flat(self, db):
+        for _ in range(3):
+            db.execute("INSERT OR REPLACE INTO understat_shot"
+                       " (shot_id, understat_id, xg) VALUES ('1', '8260', 0.5)")
+        assert db.execute(
+            "SELECT COUNT(*) c FROM understat_shot").fetchone()["c"] == 1
