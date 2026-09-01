@@ -7,3 +7,10 @@ types-PyYAML>=6.0
 types-requests>=2.31
 freezegun>=1.5          # deterministic clock for TTL / gameweek-state tests
 responses>=0.25         # HTTP fault injection for the source adapters
+
+# Static image export for Plotly figures. Not imported by the app or the test
+# suite -- it exists so a chart change can be rendered to PNG and LOOKED AT
+# before it ships. The shot map shipped stretched for exactly as long as nobody
+# could see it. Needs a Chrome/Chromium on PATH; `kaleido_get_chrome` installs
+# a private copy if there is none.
+kaleido>=1.0

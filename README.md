@@ -139,6 +139,32 @@ return a 404 error page without it. There is no bot protection involved — the
 User-Agent is irrelevant — so if this breaks again, check the endpoint shape
 before reaching for a scraping workaround.
 
+### The Understat link is a cache, and it has been wiped before
+
+Resolution writes bindings to `entity_map` (the source of truth) and denormalises
+them onto `players.understat_id`, which the xP model and the shot-map join both
+read. Two rules keep those in step:
+
+1. **Never write `players` with `INSERT OR REPLACE`.** SQLite implements REPLACE
+   as DELETE + INSERT, so it resets every column the statement does not name —
+   including `understat_id` and `purchase_price`, which are ours rather than
+   FPL's. A REPLACE here silently unresolved all 626 players on *every* FPL
+   refresh: shot maps went empty and the xP model dropped to baseline rates
+   while Understat itself was perfectly healthy and reporting success. Use the
+   `ON CONFLICT(id) DO UPDATE SET` upsert that is there now.
+2. `ingest_fpl` calls `matcher.sync_player_links()` afterwards, which rebuilds
+   the cache from `entity_map`. It is pure SQL and needs no network, so it is
+   also the repair if the column is ever found empty:
+
+```powershell
+python -c "import sqlite3; from fpl_assistant.resolve.matcher import sync_player_links; print(sync_player_links(sqlite3.connect('data/fpl.sqlite')))"
+```
+
+Symptoms of a wiped cache: an empty shot map, and a `Baseline stats` badge that
+survives a successful Understat ingest. Confirm with
+`SELECT COUNT(*) FROM players WHERE understat_id IS NOT NULL` — it should be in
+the hundreds, never 0.
+
 ## Porting to another device
 
 This device may not be where the app runs. Full, step-by-step instructions for setting it
@@ -165,6 +191,44 @@ fpl_assistant/             Core package
   leagues.py               Mini-league discovery + rival selection
 config/sources.yaml        News feeds (editable)
 data/                      SQLite DB (git-ignored, regenerated locally)
+```
+
+## Charts: shot map conventions
+
+`fpl_assistant/ui/charts.py` holds decisions that look like arbitrary constants
+and are not. Each is pinned by a test in `tests/test_ui_and_scheduling.py`
+(`TestShotMarkerScale`, `TestShotMapGeometry`); read those before tuning one.
+
+* **Marker area encodes xG against a fixed anchor of 1.0 xG = 26px.** Diameter
+  goes as `sqrt(xG)` because Plotly's `marker.size` is a diameter and *area* is
+  what the eye compares. The anchor is absolute, never the selected player's own
+  maximum — per-figure normalisation would draw a defender's best header the same
+  size as a striker's tap-in and quietly destroy the cross-player comparison the
+  chart exists for.
+* **The figure is drawn in metres, not Understat's 0–1 units.** Those units are
+  anisotropic (one x-unit is 105m, one y-unit is 68m), so a 1:1 aspect lock on
+  them squashes the pitch by a third. In metres the correct lock is exactly 1:1.
+* **`scaleanchor` needs `constrain="domain"`.** Plotly's default is
+  `constrain="range"`, which honours an aspect ratio by *widening the range until
+  the figure fills its container* — so a requested `range` acts only as a floor
+  and the same code renders as a tall strip in a narrow column and a stretched
+  landscape in a wide one. `domain` shrinks the plotting area instead.
+* **The view is a crop (54m × 35m), and crops are not outlined.** Only real pitch
+  lines are drawn; boxing the view would invite reading its edge as a touchline.
+  The plot background paints the cropped pitch, so grass with no shots on it
+  reads as grass rather than as a broken figure.
+* **The frame is fixed for every player.** One hopeful 50-yarder must not rescale
+  the goalmouth. Shots outside the crop are counted in the subtitle instead of
+  being silently dropped or drawn somewhere they were not taken from.
+* **Own goals are excluded.** Understat files them under the scorer at 0.00 xG
+  and ~100m from the goal being drawn; counting one adds a goal against no xG,
+  which reads on the Goals − xG tile as elite finishing.
+
+Chart changes should be **looked at**, not reasoned about. `kaleido` is in
+`requirements-dev.txt` for that:
+
+```python
+fig.write_image("check.png", width=780, height=520)   # then open it
 ```
 
 ## Keeping data fresh

@@ -46,8 +46,15 @@ def ingest_fpl(cfg: Config) -> int:
             )
 
         for p in boot["elements"]:
+            # Upsert, NOT `INSERT OR REPLACE`. REPLACE is DELETE+INSERT, so it
+            # resets every column this statement does not name -- and two of
+            # them are ours, not FPL's: `understat_id` (written by entity
+            # resolution) and `purchase_price`. A REPLACE here silently
+            # unresolved all 626 players on every refresh, which emptied the
+            # shot maps and dropped the xP model back onto FPL baseline rates
+            # while Understat itself was perfectly healthy.
             conn.execute(
-                """INSERT OR REPLACE INTO players
+                """INSERT INTO players
                    (id, web_name, first_name, second_name, team_id, element_type, position,
                     now_cost, selected_by_percent, form, points_per_game, total_points, status,
                     chance_of_playing_next_round, transfers_in_event, transfers_out_event,
@@ -55,7 +62,37 @@ def ingest_fpl(cfg: Config) -> int:
                     price_change_percent, scout_news_link, ep_next, team_join_date,
                     corners_order, freekicks_order, penalties_order)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                     web_name = excluded.web_name,
+                     first_name = excluded.first_name,
+                     second_name = excluded.second_name,
+                     team_id = excluded.team_id,
+                     element_type = excluded.element_type,
+                     position = excluded.position,
+                     now_cost = excluded.now_cost,
+                     selected_by_percent = excluded.selected_by_percent,
+                     form = excluded.form,
+                     points_per_game = excluded.points_per_game,
+                     total_points = excluded.total_points,
+                     status = excluded.status,
+                     chance_of_playing_next_round =
+                       excluded.chance_of_playing_next_round,
+                     transfers_in_event = excluded.transfers_in_event,
+                     transfers_out_event = excluded.transfers_out_event,
+                     news = excluded.news,
+                     news_added = excluded.news_added,
+                     region = excluded.region,
+                     known_name = excluded.known_name,
+                     minutes = excluded.minutes,
+                     starts = excluded.starts,
+                     price_change_percent = excluded.price_change_percent,
+                     scout_news_link = excluded.scout_news_link,
+                     ep_next = excluded.ep_next,
+                     team_join_date = excluded.team_join_date,
+                     corners_order = excluded.corners_order,
+                     freekicks_order = excluded.freekicks_order,
+                     penalties_order = excluded.penalties_order""",
                 (
                     p["id"], p["web_name"], p["first_name"], p["second_name"], p["team"],
                     p["element_type"], POSITIONS.get(p["element_type"], "?"),
@@ -93,6 +130,14 @@ def ingest_fpl(cfg: Config) -> int:
 
         set_meta(conn, "fpl_last_ingest", _now())
         conn.commit()
+
+        # Reconcile the denormalised Understat link from `entity_map`. Free
+        # (pure SQL, no network) and idempotent, so the refresh can never
+        # leave the shot maps and the xP model unresolved while resolution
+        # itself is intact.
+        from .resolve.matcher import sync_player_links
+        sync_player_links(conn)
+
         return int(gw)
     finally:
         conn.close()

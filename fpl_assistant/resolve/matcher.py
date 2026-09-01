@@ -404,7 +404,22 @@ def resolve_all(conn: sqlite3.Connection, season: int,
              res.runner_up_score, res.source_hash, now),
         )
 
-    # Denormalise onto players for cheap joins downstream.
+    sync_player_links(conn)
+    return report
+
+
+def sync_player_links(conn: sqlite3.Connection) -> int:
+    """Denormalise `entity_map` onto `players.understat_id` for cheap joins.
+
+    `entity_map` is the source of truth; the column on `players` is a cache
+    that the xP model and the shot-map join both read. Keeping the two in
+    step is pure SQL with no network cost, so it is safe to call after any
+    write to `players` -- which is exactly what the FPL refresh needs, since
+    a bootstrap ingest that touches all 626 rows must not be able to leave
+    the cache empty while resolution is intact.
+
+    Returns the number of players carrying a link afterwards.
+    """
     conn.execute(
         """UPDATE players SET understat_id = (
                SELECT understat_id FROM entity_map
@@ -412,7 +427,10 @@ def resolve_all(conn: sqlite3.Connection, season: int,
                  AND entity_map.status = 'resolved')"""
     )
     conn.commit()
-    return report
+    row = conn.execute(
+        "SELECT COUNT(*) FROM players WHERE understat_id IS NOT NULL"
+    ).fetchone()
+    return int(row[0]) if row else 0
 
 
 def unresolved(conn: sqlite3.Connection) -> list[dict]:

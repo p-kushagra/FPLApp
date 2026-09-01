@@ -30,6 +30,8 @@ You are acting as a synchronized, 20+ year Principal Engineering triad:
 # Build & Execution Rules (Token & Context Optimization)
 * **Surgical File Edits:** Apply targeted, diff-oriented modifications. Do not rewrite large files when updating isolated functions or components.
 * **Dependency & State Awareness:** Explicitly track dependencies (`pulp`, `apscheduler`, `plotly`, `scipy`) and handle missing schema columns or empty API payloads defensively.
+* **Never `INSERT OR REPLACE` a table carrying locally-derived columns.** SQLite implements REPLACE as DELETE + INSERT, so it resets every column the statement does not name. `players` carries `understat_id` (written by entity resolution) and `purchase_price`; `my_picks` carries `selling_price`/`purchase_price`. Use `ON CONFLICT(...) DO UPDATE SET` and name the source-owned columns explicitly. This shipped once and silently unresolved every player on every FPL refresh, emptying the shot maps and dropping the xP model to baseline rates while Understat reported healthy.
+* **Charts are verified visually, not by reasoning.** `kaleido` (in `requirements-dev.txt`) renders any Plotly figure to PNG — do that and look at it before calling a chart change done. Aspect-locked figures additionally require `constrain="domain"`; without it Plotly widens the axis range to fill the container and the figure's shape becomes a function of the browser window. Shot-map encoding rules and their pinning tests are documented in README.md → *Charts: shot map conventions*.
 * **Test-Driven Rigor:** Maintain 100% pass rates across test suites:
   - `T-SOLV-06`: 15-man squad legality, budget limits, club caps, and formation rules.
   - `T-RES-01`: Deterministic entity matching between FPL and Understat with zero false bindings.

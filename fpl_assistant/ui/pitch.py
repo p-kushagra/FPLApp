@@ -191,8 +191,8 @@ def _shirt_trace(go, group, starting: bool, show_points: bool):
                      " ".join(p.badges) or "-",
                      "starting" if p.starting else f"bench {p.bench_order}"]
                     for p in players],
-        hovertemplate=("<b>%{text}</b><br>%{customdata[0]} &middot; "
-                       "%{customdata[1]} &middot; %{customdata[2]:.1f}m<br>"
+        hovertemplate=("<b>%{text}</b><br>%{customdata[0]} · "
+                       "%{customdata[1]} · %{customdata[2]:.1f}m<br>"
                        "xP %{customdata[3]:.2f}<br>%{customdata[4]}<br>"
                        "%{customdata[5]}<extra></extra>"),
         name="Starting XI" if starting else "Bench")

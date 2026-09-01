@@ -29,6 +29,15 @@ from fpl_assistant.ui.components import (
 st.set_page_config(page_title="Squad & News", page_icon="\U0001F465",
                    layout="wide")
 
+# Plotly's modebar, minus every control that would fight the fixed pitch aspect.
+SHOT_MAP_CONFIG = {
+    "displaylogo": False,
+    "scrollZoom": False,
+    "modeBarButtonsToRemove": ["zoom2d", "pan2d", "select2d", "lasso2d",
+                               "zoomIn2d", "zoomOut2d", "autoScale2d",
+                               "resetScale2d"],
+}
+
 cfg, conn, quality = boot_full()
 st.title("\U0001F465 Squad & News")
 
@@ -215,10 +224,28 @@ with shots_tab, error_boundary("Shot maps", quality=quality):
                 minute=r["minute"], situation=r["situation"] or "",
                 opponent=opponent or ""))
 
-        st.plotly_chart(
-            charts.shot_map(shots, title=by_id[chosen]["web_name"]),
-            width="stretch")
+        # Centred in a narrower column on purpose. The figure holds a true
+        # pitch aspect, so in a full-width `layout="wide"` container it is
+        # limited by height and shrinks to a small pitch adrift in a lot of
+        # empty canvas. Constraining the column instead lets the same height
+        # draw a much bigger pitch.
+        #
+        # The pitch has one correct framing, so the zoom/pan/autoscale cluster
+        # only offers ways to break it. The camera icon is worth keeping: a
+        # shot map is something people paste into a league chat.
+        _, middle, _ = st.columns([1, 4, 1])
+        with middle:
+            st.plotly_chart(
+                charts.shot_map(shots, title=by_id[chosen]["web_name"],
+                                height=520),
+                width="stretch", config=SHOT_MAP_CONFIG)
 
+        # Own goals are in Understat's shot feed for the player who scored
+        # them, at 0.00 xG. They are not attempts at the opponent's goal, so
+        # they belong in neither the map nor the finishing metrics: counting
+        # one adds a goal against no xG and flatters Goals - xG by a full
+        # goal. Excluded here so the tiles and the figure agree.
+        shots = [s for s in shots if not s.is_own_goal]
         goals = [s for s in shots if s.is_goal]
         total_xg = sum(s.xg for s in shots)
         m1, m2, m3, m4 = st.columns(4)

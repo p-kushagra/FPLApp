@@ -72,6 +72,106 @@ class TestPitchModel:
         assert pitch_mod.figure([]).layout.annotations
 
 
+class TestShotMarkerScale:
+    """The marker scale is the whole encoding, so it is pinned, not eyeballed.
+
+    A shot map's only quantitative channel is marker area. These tests fix the
+    three properties that make it readable: area tracks xG, the scale is
+    absolute rather than per-figure, and the largest mark stays small enough
+    that a cluster of big chances does not merge into one blob -- which is
+    exactly what a 70px-per-root-xG scale used to produce in front of goal.
+    """
+
+    def test_area_is_proportional_to_xg(self):
+        """Doubling xG doubles the ink. Diameter must go as sqrt(xG)."""
+        for low in (0.1, 0.2, 0.4):   # all clear of the 8px floor
+            big = charts._shot_marker_px(low * 2) ** 2
+            small = charts._shot_marker_px(low) ** 2
+            assert big / small == pytest.approx(2.0, rel=0.02), (
+                f"area ratio wrong at xG={low}: sizing by diameter instead of "
+                "area overstates a big chance roughly fourfold")
+
+    def test_the_floor_compresses_only_speculative_chances(self):
+        """The >=8px floor costs gradation at the bottom. Bound that cost.
+
+        Below the floor every shot renders identically, so the floor must sit
+        low enough that it only flattens shots nobody ranks against each
+        other -- a 0.02 and a 0.05 are both "hopeful". A floor reaching into
+        real chances would hide the thing the chart is for.
+        """
+        floor_xg = (charts.SHOT_MIN_PX / charts.SHOT_MAX_PX) ** 2
+        assert floor_xg < 0.12, (
+            f"the 8px floor flattens everything below {floor_xg:.3f} xG, "
+            "which is reaching into genuine chances")
+        # Anything a manager would call a chance still ranks by size.
+        assert (charts._shot_marker_px(0.25)
+                < charts._shot_marker_px(0.5)
+                < charts._shot_marker_px(0.75))
+
+    def test_scale_is_absolute_not_per_figure(self):
+        """The same shot is the same size on every player's map.
+
+        Normalising to the selected player's own maximum would render a
+        defender's best header at the same size as a striker's tap-in, and
+        the cross-player comparison is the reason the chart exists.
+        """
+        penalty = charts._shot_marker_px(0.76)
+        assert penalty == pytest.approx((0.76 ** 0.5) * charts.SHOT_MAX_PX)
+        # No argument exists through which other shots could influence it.
+        assert charts._shot_marker_px(0.76) == penalty
+
+    def test_largest_realistic_shot_cannot_swamp_the_box(self):
+        """A certain goal is the anchor and is still a small mark."""
+        assert charts._shot_marker_px(1.0) == pytest.approx(charts.SHOT_MAX_PX)
+        assert charts.SHOT_MAX_PX <= 30, (
+            "the six-yard box is ~55px tall on this figure; a marker above "
+            "~30px turns a cluster of chances into one blob")
+        # An xG above the anchor is theoretically impossible, but must not
+        # blow up the figure if a source ever reports one.
+        assert charts._shot_marker_px(1.5) < 2 * charts.SHOT_MAX_PX
+
+    def test_smallest_shot_stays_a_visible_hit_target(self):
+        assert charts._shot_marker_px(0.0) == charts.SHOT_MIN_PX
+        assert charts._shot_marker_px(0.001) >= 8.0
+
+    @pytest.mark.skipif(not charts.available(), reason="needs plotly")
+    def test_a_goal_and_a_miss_of_equal_xg_are_the_same_size(self):
+        """Outcome is encoded once, in colour and symbol -- never in area."""
+        fig = charts.shot_map([
+            charts.Shot(x=0.9, y=0.5, xg=0.4, result="Goal"),
+            charts.Shot(x=0.8, y=0.4, xg=0.4, result="MissedShots"),
+        ])
+        sizes = [trace.marker.size[0] for trace in fig.data]
+        assert len(sizes) == 2 and sizes[0] == sizes[1]
+
+    @pytest.mark.skipif(not charts.available(), reason="needs plotly")
+    def test_own_goal_is_not_a_goal_and_is_not_mapped(self):
+        """Understat files own goals under the scorer, at 0.00 xG.
+
+        Counted as a goal it adds +1 against no xG -- the Goals - xG tile then
+        reports elite finishing for putting one in your own net. It also sits
+        ~100m from the goal being drawn.
+        """
+        own = charts.Shot(x=0.04, y=0.5, xg=0.0, result="OwnGoal")
+        assert own.is_own_goal and not own.is_goal
+
+        real = charts.Shot(x=0.93, y=0.5, xg=0.4, result="Goal")
+        fig = charts.shot_map([real, own])
+        plotted = sum(len(trace.x) for trace in fig.data)
+        assert plotted == 1, "the own goal was drawn on the map"
+        assert "1 shots" in fig.layout.title.text
+
+    @pytest.mark.skipif(not charts.available(), reason="needs plotly")
+    def test_subtitle_uses_a_real_separator_not_an_html_entity(self):
+        """Plotly renders a small HTML subset and does NOT decode entities.
+
+        `&middot;` reached the screen verbatim as "11 shots &middot; 2.25 xG".
+        """
+        fig = charts.shot_map([charts.Shot(x=0.9, y=0.5, xg=0.4)])
+        assert "&middot;" not in fig.layout.title.text
+        assert "·" in fig.layout.title.text
+
+
 class TestSwapValidation:
     def test_legal_outfield_swap(self):
         squad = _squad(4, 4, 2)
@@ -482,3 +582,113 @@ class TestAvailabilityWiringRegression:
         brief = briefing_svc.build(db, None, 3, squad_gw=2)
         entry = (brief.starting_xi + brief.bench)[0]
         assert entry.flag == "25%"
+
+
+@pytest.mark.skipif(not charts.available(), reason="needs plotly")
+class TestShotMapGeometry:
+    """The pitch must be the right shape in any container, and stay put.
+
+    The figure previously locked its aspect with `scaleanchor` alone. Plotly's
+    default for that is `constrain="range"` -- it honours the ratio by WIDENING
+    the range until the figure fills its container -- so the requested range was
+    only a floor and the same code drew a tall strip in a narrow column and a
+    stretched landscape in a wide one, pitch adrift in the middle of both.
+    """
+
+    def _fig(self, *shots):
+        return charts.shot_map(list(shots) or [charts.Shot(0.9, 0.5, 0.3)])
+
+    def test_aspect_is_constrained_by_domain_not_range(self):
+        fig = self._fig()
+        assert fig.layout.yaxis.scaleanchor == "x"
+        assert fig.layout.yaxis.scaleratio == 1
+        assert fig.layout.xaxis.constrain == "domain"
+        assert fig.layout.yaxis.constrain == "domain", (
+            'without constrain="domain" plotly widens the range to fill the '
+            "container and the pitch stops being pitch-shaped")
+
+    def test_axes_are_in_metres_so_the_1_to_1_lock_is_truthful(self):
+        """A 1:1 lock is only correct if both axes are the same unit.
+
+        Understat's raw units are anisotropic -- 1 x-unit is 105m and 1 y-unit
+        is 68m -- so locking those 1:1 would squash the pitch by a third.
+        """
+        shot = charts.Shot(x=1.0, y=1.0, xg=0.1)
+        assert shot.across_m == pytest.approx(charts.PITCH_WIDTH_M)
+        assert shot.upfield_m == pytest.approx(charts.PITCH_LENGTH_M)
+
+    def test_goal_is_a_horizontal_segment_at_the_top(self):
+        fig = self._fig()
+        horizontals = [s for s in fig.layout.shapes
+                       if s.type == "line" and s.y0 == s.y1]
+        goal = [s for s in horizontals
+                if s.x1 - s.x0 == pytest.approx(charts.GOAL_WIDTH_M)]
+        assert len(goal) == 1, "expected one goal-width horizontal segment"
+        assert goal[0].y0 == pytest.approx(charts.PITCH_LENGTH_M)
+        # ...at the TOP of the drawn range, not the bottom.
+        low, high = fig.layout.yaxis.range
+        assert abs(high - goal[0].y0) < abs(goal[0].y0 - low)
+        # The goal is the one mark drawn at full strength.
+        assert all(g.line.width >= s.line.width
+                   for g in goal for s in horizontals)
+
+    def test_the_crop_is_not_outlined_as_if_it_were_a_touchline(self):
+        """Only real pitch lines get drawn.
+
+        The view is a crop, so its left, right and back edges are not lines on
+        a pitch. Outlining them invites the reader to read the nearest edge as
+        a touchline and misjudge every angle measured from it.
+        """
+        fig = self._fig()
+        rects = [s for s in fig.layout.shapes if s.type == "rect"]
+        widths = {round(r.x1 - r.x0, 2) for r in rects}
+        assert widths == {charts.PEN_AREA_WIDTH_M, charts.SIX_YARD_WIDTH_M}, (
+            "an outline was drawn around the cropped view")
+
+    def test_markings_match_the_laws_of_the_game(self):
+        rects = [s for s in self._fig().layout.shapes if s.type == "rect"]
+        boxes = {round(r.x1 - r.x0, 2): round(r.y1 - r.y0, 2) for r in rects}
+        assert boxes[charts.PEN_AREA_WIDTH_M] == charts.PEN_AREA_DEPTH_M
+        assert boxes[charts.SIX_YARD_WIDTH_M] == charts.SIX_YARD_DEPTH_M
+
+    def test_frame_is_identical_for_every_player(self):
+        """Comparability: one long-ranger must not rescale the goalmouth."""
+        close = self._fig(charts.Shot(0.95, 0.5, 0.4))
+        far = self._fig(charts.Shot(0.95, 0.5, 0.4),
+                        charts.Shot(0.55, 0.5, 0.01))
+        assert close.layout.yaxis.range == far.layout.yaxis.range
+        assert close.layout.xaxis.range == far.layout.xaxis.range
+
+    def test_shots_outside_the_frame_are_declared_not_dropped(self):
+        fig = self._fig(charts.Shot(0.95, 0.5, 0.4),
+                        charts.Shot(0.50, 0.5, 0.01))
+        assert "outside the view" in fig.layout.title.text
+        assert "2 shots" in fig.layout.title.text, "still counted in the total"
+
+    def test_a_wide_shot_is_declared_too_not_just_a_distant_one(self):
+        """The crop is in both directions, so the count must be too."""
+        wide = charts.Shot(x=0.95, y=0.02, xg=0.05)   # near the touchline
+        fig = self._fig(charts.Shot(0.95, 0.5, 0.4), wide)
+        assert "outside the view" in fig.layout.title.text
+
+    def test_zoom_and_pan_are_disabled(self):
+        """A pitch has one correct framing; zoom only offers ways to break it."""
+        fig = self._fig()
+        assert fig.layout.xaxis.fixedrange is True
+        assert fig.layout.yaxis.fixedrange is True
+
+    def test_ordinary_shots_all_land_inside_the_frame(self):
+        """The frame must cover the shots people actually take.
+
+        Corners of the penalty area and the edge of the D included -- if a
+        routine shot needs the "outside the view" note, the crop is too tight.
+        """
+        fig = self._fig(*[charts.Shot(x, y, 0.1)
+                          for x in (0.70, 0.80, 0.90, 0.99)
+                          for y in (0.22, 0.5, 0.78)])
+        assert "off the map" not in fig.layout.title.text
+        low, high = fig.layout.yaxis.range
+        xlow, xhigh = fig.layout.xaxis.range
+        for trace in fig.data:
+            assert all(low <= v <= high for v in trace.y)
+            assert all(xlow <= v <= xhigh for v in trace.x)

@@ -325,6 +325,132 @@ class TestPersistence:
 
 
 # --------------------------------------------------------------------------
+# The link must survive the OTHER pipelines
+# --------------------------------------------------------------------------
+class TestLinkSurvivesFplRefresh:
+    """Risk R2's quiet twin: resolution that is correct but then destroyed.
+
+    `players.understat_id` is a cache of `entity_map`, and the FPL bootstrap
+    ingest rewrites every row of `players`. It used to do that with
+    `INSERT OR REPLACE`, which in SQLite is DELETE+INSERT -- so a refresh
+    reset the column to NULL for the whole table while `entity_map` stayed
+    perfectly intact. Nothing looked broken: Understat was healthy, the
+    ingest reported success, and the only symptoms were an empty shot map
+    and an xP model quietly back on FPL baseline rates.
+    """
+
+    def test_fpl_refresh_preserves_the_understat_link(
+            self, db, db_path, fpl_players, understat_players, monkeypatch):
+        _seed(db, fpl_players, understat_players)
+        matcher.resolve_all(db, SEASON, TEAM_ALIASES, {})
+        before = _linked(db)
+        assert before >= 5, "precondition: resolution actually bound players"
+
+        _run_fpl_ingest(db_path, fpl_players, monkeypatch)
+
+        assert _linked(db) == before, (
+            "the FPL refresh cleared players.understat_id -- resolution "
+            "survives in entity_map but every downstream join is now empty")
+        assert db.execute(
+            "SELECT understat_id FROM players WHERE id = 1"
+        ).fetchone()["understat_id"] == "100"
+
+    def test_refresh_still_updates_the_fpl_owned_columns(
+            self, db, db_path, fpl_players, understat_players, monkeypatch):
+        """Preserving our columns must not freeze FPL's."""
+        _seed(db, fpl_players, understat_players)
+        matcher.resolve_all(db, SEASON, TEAM_ALIASES, {})
+
+        _run_fpl_ingest(db_path, fpl_players, monkeypatch, now_cost=142,
+                        status="i", news="Knock - assess")
+
+        row = db.execute(
+            "SELECT now_cost, status, news, understat_id FROM players "
+            "WHERE id = 1").fetchone()
+        assert row["now_cost"] == pytest.approx(14.2)
+        assert row["status"] == "i"
+        assert row["news"] == "Knock - assess"
+        assert row["understat_id"] == "100", "and the link still survives"
+
+    def test_refresh_does_not_reset_columns_it_does_not_write(
+            self, db, db_path, fpl_players, understat_players, monkeypatch):
+        """Isolates the upsert from the sync that backs it up.
+
+        `ingest_fpl` also re-syncs `understat_id` from `entity_map`, so that
+        column alone cannot prove the write itself is non-destructive -- a
+        REPLACE would be repaired a line later and the test would pass.
+        `purchase_price` is the honest canary: it is equally ours, equally
+        absent from the bootstrap payload, and nothing repairs it.
+        """
+        _seed(db, fpl_players, understat_players)
+        matcher.resolve_all(db, SEASON, TEAM_ALIASES, {})
+        db.execute("UPDATE players SET purchase_price = 9.5 WHERE id = 1")
+        db.commit()
+
+        _run_fpl_ingest(db_path, fpl_players, monkeypatch)
+
+        assert db.execute(
+            "SELECT purchase_price FROM players WHERE id = 1"
+        ).fetchone()["purchase_price"] == pytest.approx(9.5), (
+            "the players write is destructive: it reset a column it never "
+            "named. INSERT OR REPLACE is DELETE+INSERT -- use an upsert.")
+
+    def test_sync_repairs_a_link_wiped_by_anything_else(
+            self, db, fpl_players, understat_players):
+        """entity_map is the source of truth, so repair needs no network."""
+        _seed(db, fpl_players, understat_players)
+        matcher.resolve_all(db, SEASON, TEAM_ALIASES, {})
+        expected = _linked(db)
+
+        db.execute("UPDATE players SET understat_id = NULL")
+        db.commit()
+        assert _linked(db) == 0
+
+        assert matcher.sync_player_links(db) == expected
+        assert _linked(db) == expected
+
+
+def _linked(conn) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) c FROM players WHERE understat_id IS NOT NULL"
+    ).fetchone()["c"]
+
+
+def _run_fpl_ingest(db_path, fpl_players, monkeypatch, *, now_cost=100,
+                    status="a", news=""):
+    """Drive the real `pipeline.ingest_fpl` against a stubbed bootstrap."""
+    from fpl_assistant import pipeline
+
+    elements = [{
+        "id": p["id"], "web_name": p["web_name"],
+        "first_name": p["first_name"], "second_name": p["second_name"],
+        "team": 1, "element_type": 3, "now_cost": now_cost,
+        "selected_by_percent": "1.0", "form": "1.0", "points_per_game": "1.0",
+        "total_points": 10, "status": status,
+        "chance_of_playing_next_round": None,
+        "transfers_in_event": 0, "transfers_out_event": 0, "news": news,
+    } for p in fpl_players]
+
+    class _StubClient:
+        def bootstrap(self):
+            return {"teams": [{"id": 1, "name": "Manchester City",
+                               "short_name": "MCI"}],
+                    "elements": elements,
+                    "events": [{"id": 2, "is_current": True}]}
+
+        def fixtures(self):
+            return []
+
+    monkeypatch.setattr(pipeline, "FplClient", _StubClient)
+
+    class _Cfg:
+        pass
+    cfg = _Cfg()
+    cfg.db_path = db_path
+    return pipeline.ingest_fpl(cfg)
+
+
+# --------------------------------------------------------------------------
 def _seed(conn, fpl_players, understat_players):
     """Load the miniature universe into players / teams / understat_player."""
     teams = {"MCI": 1, "TOT": 2, "CHE": 3}
