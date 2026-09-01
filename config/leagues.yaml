@@ -1,0 +1,8 @@
+# Mini-leagues to track, and which rivals form the ILEO reference set.
+tracked: []
+  # - id: 123456
+  #   name: "Work league"
+  #   rivals: [1234567, 2345678]   # empty/absent = auto-select top N by rank
+
+default_rival_count: 8
+max_rivals: 20          # caps the per-GW freeze request budget

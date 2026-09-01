@@ -1,0 +1,23 @@
+horizon: 5
+candidates_per_position: 40
+time_limit_seconds: 30
+mip_gap: 0.01
+
+weights:
+  gamma: 0.90          # per-GW discount
+  bench: 0.10          # beta
+  terminal_ft: 1.5     # mu, points per banked FT at horizon end
+  team_value: 0.5      # lambda, points per GBP 1m of TV
+  differential: 0.0    # eta, non-zero only on the aggressive path
+
+profiles:
+  conservative: {max_hits: 0, gamma: 0.95, terminal_ft: 3.0, differential: 0.0}
+  aggressive:   {max_hits: 2, gamma: 0.75, terminal_ft: 0.5, differential: 1.2}
+  chip_setup:   {max_hits: 1, gamma: 0.90, terminal_ft: 1.0, differential: 0.0}
+
+# Applied in order when the model is infeasible (design doc 5.3)
+relaxation_ladder:
+  - drop_chip_shape
+  - allow_one_hit
+  - horizon_to_3
+  - greedy_fallback

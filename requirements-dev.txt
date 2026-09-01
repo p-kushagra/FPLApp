@@ -1,0 +1,9 @@
+# Development and CI only. Not needed to run the app.
+pytest>=8.2
+pytest-cov>=5.0
+ruff>=0.5
+mypy>=1.10
+types-PyYAML>=6.0
+types-requests>=2.31
+freezegun>=1.5          # deterministic clock for TTL / gameweek-state tests
+responses>=0.25         # HTTP fault injection for the source adapters

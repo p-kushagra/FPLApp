@@ -1,0 +1,44 @@
+# FPL rules that change between seasons. Never hard-code these in Python.
+# Verify against https://fantasy.premierleague.com/help/rules each season.
+version: "2025-26"
+verified_on: "2026-09-01"
+
+transfers:
+  free_per_gw: 1
+  max_banked: 5              # was 2 before 2024/25
+  hit_cost: 4
+  chip_retains_ft: true      # WC/FH do not consume the bank
+  chip_accrues_ft: false     # Verified: FPL does not accrue FTs during chip GWs
+
+squad:
+  size: 15
+  budget: 100.0
+  max_per_club: 3
+  quota: {GKP: 2, DEF: 5, MID: 5, FWD: 3}
+  formation:
+    GKP: [1, 1]
+    DEF: [3, 5]
+    MID: [2, 5]
+    FWD: [1, 3]
+  sell_price_profit_share: 0.5   # 50% of profit, rounded down to 0.1
+
+scoring:
+  appearance: {under_60: 1, over_60: 2}
+  goal: {GKP: 10, DEF: 6, MID: 5, FWD: 4}
+  assist: 3
+  clean_sheet: {GKP: 4, DEF: 4, MID: 1, FWD: 0}
+  goals_conceded_per_two: {GKP: -1, DEF: -1}
+  saves_per_3: 1
+  penalty_save: 5
+  penalty_miss: -2
+  yellow: -1
+  red: -3
+  own_goal: -2
+  defensive_contribution:
+    points: 2
+    threshold: {DEF: 10, MID: 12, FWD: 12}
+
+chips:
+  available: [wildcard, bench_boost, triple_captain, free_hit]
+  wildcards_per_season: 2
+  second_half_start_gw: 20

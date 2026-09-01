@@ -1,8 +1,15 @@
 """SQLite storage layer with an FTS5 full-text index for news search."""
 from __future__ import annotations
 
+import shutil
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
+
+from .schema_v2 import V2_TABLES
+
+# Bumped whenever MIGRATIONS gains a step. Stored in meta.schema_version.
+SCHEMA_VERSION = 2
 
 SCHEMA = r"""
 PRAGMA journal_mode=WAL;
@@ -142,6 +149,84 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")
 
 
+# --------------------------------------------------------------------------
+# Versioned migration ladder (schema v2+)
+#
+# `_MIGRATIONS` above can only add columns. The ladder can create tables and
+# indices and run Python backfills, and it records progress so a half-applied
+# upgrade resumes rather than restarts. Steps must be idempotent: every DDL
+# statement uses IF NOT EXISTS and every backfill is safe to re-run.
+# --------------------------------------------------------------------------
+MIGRATIONS: list[tuple[int, str | Callable[[sqlite3.Connection], None]]] = [
+    (2, V2_TABLES),
+    (2, lambda conn: _v2_add_columns(conn)),
+]
+
+# Columns added to v1 tables by schema v2. Separate from _MIGRATIONS so the v1
+# dict stays a record of what v1 shipped with.
+_V2_COLUMNS = {
+    "players": {"understat_id": "TEXT", "purchase_price": "REAL"},
+    "my_picks": {"selling_price": "REAL", "purchase_price": "REAL", "chip": "TEXT"},
+}
+
+
+def _v2_add_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in _V2_COLUMNS.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, coltype in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {coltype}")
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    return int(get_meta(conn, "schema_version", "1") or 1)
+
+
+def migrate(conn: sqlite3.Connection) -> int:
+    """Apply pending migration steps in order. Returns the resulting version.
+
+    Steps are grouped by target version and the version is stamped only once
+    every step for it has succeeded, so an interrupted upgrade resumes from the
+    last fully-applied version rather than skipping a half-run step.
+    """
+    current = schema_version(conn)
+    versions = sorted({v for v, _ in MIGRATIONS if v > current})
+
+    for version in versions:
+        for step_version, step in MIGRATIONS:
+            if step_version != version:
+                continue
+            with conn:  # one transaction per step
+                if isinstance(step, str):
+                    conn.executescript(step)
+                else:
+                    step(conn)
+        set_meta(conn, "schema_version", version)
+        conn.commit()
+        current = version
+
+    return current
+
+
+def _backup_once(db_path: Path, conn: sqlite3.Connection) -> None:
+    """Snapshot a pre-v2 database before its first upgrade.
+
+    Migrations are additive, so this is belt-and-braces rather than the primary
+    rollback path -- but a corrupted season of history is unrecoverable, and the
+    file is small enough that the copy is free.
+    """
+    if schema_version(conn) >= 2 or not db_path.exists():
+        return
+    backup = db_path.with_suffix(db_path.suffix + ".bak.v1")
+    if backup.exists():
+        return
+    try:
+        conn.commit()
+        shutil.copy2(db_path, backup)
+    except OSError:
+        pass  # a failed backup must never block the upgrade
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -154,6 +239,8 @@ def init_db(db_path: Path) -> None:
         conn.executescript(SCHEMA)
         _migrate(conn)
         conn.commit()
+        _backup_once(db_path, conn)
+        migrate(conn)
     except sqlite3.OperationalError as exc:
         if "fts5" in str(exc).lower():
             raise RuntimeError(

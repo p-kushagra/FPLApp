@@ -1,0 +1,8 @@
+# OPTIONAL: only needed when JOB_RUNNER=celery (see ADR-002).
+# The default LocalThreadRunner requires nothing beyond requirements.txt.
+#
+# Windows note: Celery has had no official Windows support since 3.1. Run the
+# worker with:  celery -A fpl_assistant.jobs.runner_celery worker --pool=solo
+-r requirements.txt
+celery[redis]>=5.4
+redis>=5.0

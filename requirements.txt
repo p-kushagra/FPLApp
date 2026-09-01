@@ -1,7 +1,17 @@
+# Core runtime. Everything here is required for the app to start.
 streamlit>=1.36
 requests>=2.31
 feedparser>=6.0
-rapidfuzz>=3.9
+rapidfuzz>=3.9          # entity resolution (Phase 1) + news tagging (v1)
 pandas>=2.2
+numpy>=1.26             # vectorised xP engine (Phase 4); pandas dep, pinned explicitly
 python-dotenv>=1.0
 PyYAML>=6.0
+
+# Optimisation. PuLP bundles the CBC solver binary for win/mac/linux, so the ILP
+# solver needs no external install and no licence. Phase 2.
+pulp>=2.8,<4.0
+
+# UI. Phase 5/6 surfaces.
+altair>=5.3             # luck-vs-process scatter, chip heat strips
+streamlit-sortables>=0.3  # drag-and-drop transfer planner
