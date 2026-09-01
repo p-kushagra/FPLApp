@@ -69,6 +69,18 @@ class DataQuality:
         return self.baseline_share > 0.5
 
     @property
+    def understat_unused(self) -> bool:
+        """True when not a single projection is using Understat rates.
+
+        Distinct from `on_baseline`: a healthy ingest that only resolves
+        entities for some of the squad (subs, fringe players with no
+        Understat match rows) still leaves most projections on baseline,
+        but Understat is not "not ingested" -- it's partially covering
+        the squad. Only a zero count means truly unused.
+        """
+        return self.xp_source_mix.get("understat", 0) == 0
+
+    @property
     def stale_projections(self) -> bool:
         return (self.projection_age_hours or 0) > 24
 
@@ -152,10 +164,17 @@ def collect(conn: sqlite3.Connection) -> DataQuality:
         pass
 
     if q.on_baseline and not q.understat_offline:
-        q.notes.append(
-            "Projections are on FPL baseline stats: no Understat data has been "
-            "ingested or resolved yet."
-        )
+        if q.understat_unused:
+            q.notes.append(
+                "Projections are on FPL baseline stats: no Understat data has "
+                "been ingested or resolved yet."
+            )
+        else:
+            q.notes.append(
+                "Projections are mostly on FPL baseline stats: Understat "
+                f"covers {1 - q.baseline_share:.0%} of players "
+                "(the rest have no resolved Understat match rows)."
+            )
     if q.stale_projections:
         q.notes.append(
             f"Projections are {q.projection_age_hours:.0f}h old.")

@@ -128,7 +128,13 @@ def quality_bar(quality: DataQuality, *, show_ok: bool = False) -> None:
     if quality.understat_badge:
         badges.append(f"⚠ {quality.understat_badge}")
     elif quality.on_baseline:
-        badges.append("ℹ Baseline stats (no Understat data ingested)")
+        if quality.understat_unused:
+            badges.append("ℹ Baseline stats (no Understat data ingested)")
+        else:
+            covered = 1 - quality.baseline_share
+            badges.append(
+                f"ℹ Partial Understat coverage ({covered:.0%} of players; "
+                "rest on FPL baseline)")
 
     if quality.stale_projections and quality.projection_age_hours:
         badges.append(f"⚠ Projections {quality.projection_age_hours:.0f}h old")
