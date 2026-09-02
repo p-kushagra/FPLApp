@@ -10,9 +10,10 @@ from .schema_v2 import V2_TABLES
 from .schema_v3 import V3_TABLES
 from .schema_v4 import V4_TABLES
 from .schema_v5 import V5_TABLES
+from .schema_v6 import V6_TABLES
 
 # Bumped whenever MIGRATIONS gains a step. Stored in meta.schema_version.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = r"""
 PRAGMA journal_mode=WAL;
@@ -166,6 +167,7 @@ MIGRATIONS: list[tuple[int, str | Callable[[sqlite3.Connection], None]]] = [
     (3, V3_TABLES),
     (4, V4_TABLES),
     (5, V5_TABLES),
+    (6, V6_TABLES),
 ]
 
 # Columns added to v1 tables by schema v2. Separate from _MIGRATIONS so the v1

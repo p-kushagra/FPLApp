@@ -46,7 +46,17 @@ class TestFreshDatabase:
     def test_stamps_the_version(self, db):
         # The literal is deliberate: it is the "did you mean to bump this?"
         # guard, and the only place the expected version is written down twice.
-        assert db_module.schema_version(db) == db_module.SCHEMA_VERSION == 5
+        assert db_module.schema_version(db) == db_module.SCHEMA_VERSION == 6
+
+    def test_creates_the_v6_scenario_tables(self, db):
+        """Saved sandbox scenarios live in their own namespace.
+
+        Nothing in the ingest, projection or calibration path reads these, so a
+        saved what-if can never be mistaken for the squad you actually own.
+        """
+        assert {"scenario", "scenario_pick"} <= _tables(db)
+        columns = {r["name"] for r in db.execute("PRAGMA table_info(scenario)")}
+        assert {"chip", "net_ev", "baseline_xp", "scenario_xp"} <= columns
 
     def test_adds_v2_columns_to_v1_tables(self, db):
         players = {r["name"] for r in db.execute("PRAGMA table_info(players)")}

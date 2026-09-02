@@ -477,3 +477,57 @@ class TestProcessAxisOnThePage:
         _assert_clean(app, PAGE1)
         assert not any("No pre-deadline projection" in str(i.value)
                        for i in app.info)
+
+
+# ==========================================================================
+class TestSandboxPageWiring:
+    """The glue between session state, the pitch and the impact bar.
+
+    The service layer is tested directly in `test_sandbox.py`; what only shows
+    up here is whether the page actually reads that state back. A sandbox that
+    computes a correct Net EV and renders last gameweek's is indistinguishable
+    from a broken engine, from the user's side.
+    """
+
+    def _state(self, app):
+        return app.session_state["sandbox_state"]
+
+    def test_page_opens_a_sandbox_and_renders_the_impact_bar(self, seeded_db):
+        app = _run(PAGE_SQUAD)
+        _assert_clean(app, PAGE_SQUAD)
+
+        labels = [m.label for m in app.metric]
+        for wanted in ("Transfers", "Hit", "Bank", "Net EV"):
+            assert wanted in labels, f"the impact bar is missing {wanted}"
+
+    def test_an_untouched_sandbox_reports_no_gain(self, seeded_db):
+        """The baseline must equal the scenario before anything is changed."""
+        app = _run(PAGE_SQUAD)
+        net = next(m for m in app.metric if m.label == "Net EV")
+        assert net.value in ("+0.0", "0.0"), (
+            f"an unmodified squad reports {net.value} of free points")
+
+    def test_selecting_a_player_opens_the_transfer_panel(self, seeded_db):
+        from fpl_assistant.services import sandbox as sandbox_mod
+
+        app = _run(PAGE_SQUAD)
+        state = self._state(app)
+        if not state.starters:
+            pytest.skip("seeded squad has no starters")
+
+        app.session_state["sandbox_state"] = sandbox_mod.select(
+            state, state.starters[0].player_id)
+        app.run()
+        _assert_clean(app, PAGE_SQUAD)
+        assert any("Transferring out" in m.value for m in app.markdown), (
+            "selecting a player did not open the roster panel")
+
+    def test_chip_selection_survives_a_rerun(self, seeded_db):
+        from fpl_assistant.services import sandbox as sandbox_mod
+
+        app = _run(PAGE_SQUAD)
+        app.session_state["sandbox_state"] = sandbox_mod.set_chip(
+            self._state(app), "bench_boost")
+        app.run()
+        _assert_clean(app, PAGE_SQUAD)
+        assert self._state(app).chip == "bench_boost"

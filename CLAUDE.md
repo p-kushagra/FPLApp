@@ -22,7 +22,7 @@ You are acting as a synchronized, 20+ year Principal Engineering triad:
   - `pages/1_Schedule_and_Congestion.py`: Unified FDR Heatmap, £4.0m–£4.5m Rotation Pair Finder, and European Congestion Warnings (<72h rest).
   - `pages/2_Command_Center.py`: Prescriptive Transfer Pathways (Conservative, Aggressive, Chip Enabler), 1-Click Tactical Briefing Modal, Captaincy Matrix (Shield vs. Sword), Transfer Market Ticker, and Role Arbitrage.
   - `pages/3_Live_Matchday.py`: Live provisional BPS tracker, Formation-legal Auto-Sub Simulator, and Live ILEO Rank Threat Meter.
-  - `pages/4_Squad_and_News.py`: Interactive Tactical Formation Pitch (drag-to-swap), Understat Shot Maps, ML Head-to-Head Radar, and Curated Squad/Watchlist News Feed.
+  - `pages/4_Squad_and_News.py`: Click-to-select Tactical Pitch driving an in-memory **Transfer Sandbox** (60/40 split with a filterable roster browser, chip overrides, legality enforcement and a Net EV impact bar), Understat Shot Maps, ML Head-to-Head Radar, and Curated Squad/Watchlist News Feed. Sandbox state is session-only; **Save** writes to the `scenario` tables (schema v6) and never to `my_picks`.
 * **Pre-Deadline Snapshot Freezing:** Automatically freeze projected xP vectors in `pre_gw_projections` at deadline minus 1 hour to ensure true Process vs. Luck tracking without historical lookahead bias.
 
 ---

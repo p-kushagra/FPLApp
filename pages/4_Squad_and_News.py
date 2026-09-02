@@ -10,11 +10,15 @@ injured?" -- required typing fifteen names. Here it is the landing state.
 """
 from __future__ import annotations
 
+import dataclasses
+
+import pandas as pd
 import streamlit as st
 
 from fpl_assistant import search
-from fpl_assistant.models import arbitrage as arbitrage_mod
 from fpl_assistant.models import minutes as minutes_mod
+from fpl_assistant.models import stochastic
+from fpl_assistant.services import sandbox
 from fpl_assistant.ui import boot_full, charts
 from fpl_assistant.ui import pitch as pitch_mod
 from fpl_assistant.ui.components import (
@@ -37,6 +41,78 @@ SHOT_MAP_CONFIG = {
                                "zoomIn2d", "zoomOut2d", "autoScale2d",
                                "resetScale2d"],
 }
+# The pitch is a click target, so box- and lasso-select are removed too: they
+# produce multi-point selections this page has no meaning for.
+PITCH_CONFIG = {**SHOT_MAP_CONFIG, "displayModeBar": False}
+
+
+def _clicked_player(event, squad) -> int | None:
+    """Unwrap Streamlit's event, then resolve it in `pitch` where it is tested."""
+    selection = getattr(event, "selection", None) if event is not None else None
+    return pitch_mod.player_from_selection(selection, squad)
+
+
+def _run_monte_carlo(conn, state):
+    """10k runs over the scenario XI, honouring the active chip.
+
+    Bench Boost widens the pool to all 15 and Triple Captain lifts the armband
+    to 3x, so the simulation answers the same question the impact bar does
+    rather than a different one that happens to be nearby.
+    """
+    scorers = (state.squad if state.chip == "bench_boost" else state.starters)
+    captain = state.captain
+    multipliers = {}
+    if captain is not None:
+        multipliers[captain.player_id] = float(
+            sandbox.captain_multiplier(state.chip))
+    return stochastic.simulate_squad(
+        conn, state.gw, [p.player_id for p in scorers],
+        multipliers=multipliers, runs=10_000)
+
+
+def _roster_card(candidate, state, selected, conn) -> None:
+    """One transfer target: the numbers, then the one action.
+
+    Refusals are shown on the card that caused them and name the rule that
+    broke -- "£0.4m short" is actionable where a disabled button is not.
+    """
+    card = st.container(border=True)
+    head, action = card.columns([3, 1])
+
+    fdr = candidate.next_fdr or 3
+    colour = charts.FDR_COLOURS[max(1, min(5, fdr))]
+    head.markdown(
+        f"**{candidate.name}** &nbsp;<span style='background:{colour};"
+        f"color:#fff;padding:1px 5px;border-radius:3px;font-size:11px'>"
+        f"{candidate.next_opponent or '—'}</span><br>"
+        f"<span style='font-size:12px;color:#8b949e'>"
+        f"{candidate.position} · {candidate.team} · £{candidate.cost:.1f}m · "
+        f"xP {candidate.xp:.1f} · form {candidate.form:.1f} · "
+        f"{candidate.ownership:.1f}% owned</span>",
+        unsafe_allow_html=True)
+
+    disabled = selected is None
+    if action.button("+ Swap in", key=f"swap_{candidate.player_id}",
+                     disabled=disabled, width="stretch"):
+        team_ids = _squad_team_ids(conn, state)
+        outcome = sandbox.transfer_in(state, candidate, team_ids)
+        if outcome.ok:
+            st.session_state["sandbox_state"] = outcome.state
+            st.session_state.pop("sandbox_mc", None)
+            st.rerun()
+        else:
+            card.error(outcome.reason)
+
+
+def _squad_team_ids(conn, state) -> dict[int, int]:
+    """`{player_id: team_id}` for the three-per-club check.
+
+    Read fresh rather than cached: it is one indexed scan of ~600 rows, and a
+    stale club map would let a fourth Arsenal player through the one rule
+    people actually hit.
+    """
+    return {int(r[0]): int(r[1] or -1) for r in conn.execute(
+        "SELECT id, team_id FROM players")}
 
 cfg, conn, quality = boot_full()
 st.title("\U0001F465 Squad & News")
@@ -82,11 +158,15 @@ if squad_gw is not None:
                              for a in doubts[:6]))
 
 pitch_tab, shots_tab, radar_tab, news_tab = st.tabs(
-    ["\U0001F3DF Tactical pitch", "\U0001F3AF Shot maps",
+    ["\U0001F3DF Pitch & sandbox", "\U0001F3AF Shot maps",
      "\U0001F578 Rival radar", "\U0001F4F0 News"])
 
-# --- tactical pitch --------------------------------------------------------
-with pitch_tab, error_boundary("Tactical pitch", quality=quality):
+# --- tactical pitch & transfer sandbox -------------------------------------
+# Two columns rather than stacked panels: choosing a transfer is a comparison
+# between a squad and a candidate, and a comparison that needs a scroll to see
+# both halves is not one. The pitch keeps the wider column because it holds
+# fifteen nodes; the roster is a list and reads fine narrow.
+with pitch_tab, error_boundary("Pitch & sandbox", quality=quality):
     if squad_gw is None:
         empty_state("No squad loaded",
                     "Set `FPL_TEAM_ID` in `.env`, then run **My squad** "
@@ -94,73 +174,228 @@ with pitch_tab, error_boundary("Tactical pitch", quality=quality):
     elif not charts.available():
         st.info("Install `plotly` to render the pitch: `pip install plotly`")
     else:
-        ids = [int(r["player_id"]) for r in conn.execute(
-            "SELECT player_id FROM my_picks WHERE gw = ?", (squad_gw,))]
-        badges = arbitrage_mod.badges_for(conn, ids)
-        xp = {int(r["player_id"]): float(r["xp_total"] or 0.0)
-              for r in conn.execute(
-                  "SELECT player_id, xp_total FROM xp_projection "
-                  "WHERE gw = (SELECT MAX(gw) FROM xp_projection)")}
+        state = st.session_state.get("sandbox_state")
+        if state is None or st.session_state.get("sandbox_gw") != squad_gw:
+            state = sandbox.open_sandbox(conn, squad_gw)
+            st.session_state["sandbox_state"] = state
+            st.session_state["sandbox_gw"] = squad_gw
+            st.session_state.pop("sandbox_click", None)
 
-        squad = st.session_state.get("pitch_squad")
-        if not squad or st.session_state.get("pitch_gw") != squad_gw:
-            squad = pitch_mod.load_squad(conn, squad_gw,
-                                         xp_by_player=xp, badges=badges)
-            st.session_state["pitch_squad"] = squad
-            st.session_state["pitch_gw"] = squad_gw
+        left, right = st.columns([1.8, 1.2], gap="large")
 
-        starters = [p for p in squad if p.starting]
-        cols = st.columns(4)
-        metric_card(cols[0], "Formation",
-                    pitch_mod.formation_string(starters))
-        metric_card(cols[1], "Squad value",
-                    f"£{sum(p.cost for p in squad):.1f}m")
-        metric_card(cols[2], "XI xP",
-                    f"{sum(p.xp for p in starters):.1f}")
-        metric_card(cols[3], "Flagged",
-                    sum(1 for p in squad if p.flagged))
+        # ==================================================================
+        # LEFT - pitch and scenario controls
+        # ==================================================================
+        with left:
+            controls = st.columns([1.1, 1.3, 1.0])
+            mode = ("\U0001F9EA **Sandbox active**" if state.dirty
+                    else "Current squad")
+            controls[0].markdown(f"**Mode**<br>{mode}", unsafe_allow_html=True)
 
-        st.plotly_chart(pitch_mod.figure(squad), width="stretch")
-        st.caption(
-            "Gold ring marks the captain. Coloured pill under each shirt is "
-            "the next fixture and its difficulty; blue chip is a tactical "
-            "badge. Red shirts are flagged for availability.")
+            chip_choice = controls[1].selectbox(
+                "Active chip",
+                [None, *sandbox.CHIPS],
+                index=([None, *sandbox.CHIPS]).index(state.chip),
+                format_func=lambda c: sandbox.CHIP_LABELS[c],
+                help="Chips change the arithmetic, never the squad rules: a "
+                     "Free Hit XI still has to be legal and inside budget.")
+            if chip_choice != state.chip:
+                state = sandbox.set_chip(state, chip_choice)
+                st.session_state["sandbox_state"] = state
 
-        st.markdown("##### Swap a starter and a substitute")
-        swap = st.columns([2, 2, 1, 1])
-        bench_players = [p for p in squad if not p.starting]
-        out_id = swap[0].selectbox(
-            "Starter out", [p.player_id for p in starters],
-            format_func=lambda i: next(
-                f"{p.name} ({p.position})" for p in squad
-                if p.player_id == i))
-        in_id = swap[1].selectbox(
-            "Substitute in", [p.player_id for p in bench_players],
-            format_func=lambda i: next(
-                f"{p.name} ({p.position})" for p in squad
-                if p.player_id == i))
+            entry = controls[2].columns(2)
+            free_transfers = entry[0].number_input(
+                "Free transfers", min_value=0, max_value=5,
+                value=state.free_transfers, step=1,
+                help="Banked FTs, up to the 5 the modern rules allow. Drives "
+                     "how many transfers are free before a -4 applies.")
+            # Bank is DERIVED (budget minus squad sell value) because this app
+            # does not ingest `/entry/`, which is where the real figure lives.
+            # Editable rather than merely approximate: a bank that reads £0.0m
+            # when you actually hold £1.5m silently refuses transfers you can
+            # afford, and the refusal looks like a rule rather than a guess.
+            bank = entry[1].number_input(
+                "Bank (£m)", min_value=0.0, max_value=50.0,
+                value=float(state.bank), step=0.1, format="%.1f",
+                help="Derived from the £100m budget and your squad's sell "
+                     "value. Correct it from the FPL site if it disagrees.")
+            if (free_transfers != state.free_transfers
+                    or abs(bank - state.bank) > 1e-6):
+                state = dataclasses.replace(
+                    state, free_transfers=int(free_transfers),
+                    bank=round(float(bank), 1))
+                st.session_state["sandbox_state"] = state
 
-        check = pitch_mod.validate_swap(squad, out_id, in_id)
-        if check.ok:
-            swap[2].success(check.formation)
-        else:
-            swap[2].error("illegal")
+            density = st.radio(
+                "Node detail", [pitch_mod.DENSITY_CLEAN,
+                                pitch_mod.DENSITY_DETAILED],
+                format_func=lambda d: ("Clean" if d == pitch_mod.DENSITY_CLEAN
+                                       else "Detailed (+ price, roles)"),
+                horizontal=True, label_visibility="collapsed")
 
-        if swap[3].button("Apply", disabled=not check.ok,
-                          width="stretch"):
-            st.session_state["pitch_squad"] = pitch_mod.apply_swap(
-                squad, out_id, in_id)
+            fig = pitch_mod.figure(state.squad, height=620,
+                                   selected_id=state.selected_id,
+                                   density=density)
+            event = st.plotly_chart(
+                fig, width="stretch", key="sandbox_pitch",
+                on_select="rerun", selection_mode="points",
+                config=PITCH_CONFIG)
+
+            # A Plotly click arrives as (curve, point). `node_player_ids`
+            # reproduces the figure's own plotting order, so the two cannot
+            # drift and start selecting the wrong player.
+            clicked = _clicked_player(event, state.squad)
+            if clicked is not None and clicked != st.session_state.get(
+                    "sandbox_click"):
+                st.session_state["sandbox_click"] = clicked
+                st.session_state["sandbox_state"] = sandbox.select(
+                    state, clicked)
+                st.rerun()
+
+            st.caption(
+                "Click a player to line them up for a transfer. Gold ring is "
+                "the captain, white ring is your current selection. The pill "
+                "under each shirt is the next fixture, coloured by difficulty; "
+                "red shirts are flagged. GK/1/2/3 on the bench is auto-sub "
+                "priority.")
+
+        # ==================================================================
+        # RIGHT - roster browser
+        # ==================================================================
+        with right:
+            selected = next((p for p in state.squad
+                             if p.player_id == state.selected_id), None)
+            if selected is None:
+                st.info("Select a player on the pitch to see transfer targets "
+                        "that fit your budget.")
+            else:
+                st.markdown(
+                    f"**Transferring out:** {selected.name} "
+                    f"({selected.position} · {selected.team}) — sells for "
+                    f"**£{state.sell_price(selected.player_id):.1f}m**")
+                budget = state.bank + state.sell_price(selected.player_id)
+                st.caption(
+                    f"Bank £{state.bank:.1f}m + £"
+                    f"{state.sell_price(selected.player_id):.1f}m sale = "
+                    f"**£{budget:.1f}m** to spend. FPL sells at your purchase "
+                    "price plus half the profit, not today's list price.")
+
+            search = st.text_input("Search", placeholder="Name or team",
+                                   label_visibility="collapsed")
+            filters = st.columns([1.2, 1.0])
+            position = filters[0].selectbox(
+                "Position", ["ALL", "GKP", "DEF", "MID", "FWD"],
+                index=(["ALL", "GKP", "DEF", "MID", "FWD"].index(
+                    selected.position) if selected else 0))
+            sort = filters[1].selectbox("Sort by", list(sandbox.SORTS))
+            max_price = st.slider("Max price (£m)", 3.5, 16.0,
+                                  value=16.0, step=0.1)
+
+            pool = st.session_state.get("sandbox_pool")
+            if pool is None or st.session_state.get("sandbox_pool_gw") != squad_gw:
+                pool = sandbox.candidates(conn, limit=0)
+                st.session_state["sandbox_pool"] = pool
+                st.session_state["sandbox_pool_gw"] = squad_gw
+
+            owned = {p.player_id for p in state.squad}
+            rows = sandbox.filter_candidates(
+                [c for c in pool if c.player_id not in owned],
+                query=search, position=position, max_price=max_price,
+                sort=sort)
+
+            st.caption(f"{len(rows)} players match — showing the top 25.")
+            for candidate in rows[:25]:
+                _roster_card(candidate, state, selected, conn)
+
+        # ==================================================================
+        # IMPACT BAR - the number the whole screen exists to produce
+        # ==================================================================
+        st.divider()
+        metrics = sandbox.impact(state)
+        bar = st.columns(6)
+        metric_card(bar[0], "Transfers", metrics.transfers,
+                    caption=(f"{metrics.free_used} free"
+                             if metrics.transfers else "none yet"))
+        metric_card(bar[1], "Hit",
+                    f"-{metrics.hits} pts" if metrics.hits else "0 pts",
+                    caption=(sandbox.CHIP_LABELS[state.chip]
+                             if state.chip in sandbox.FREE_TRANSFER_CHIPS
+                             else f"{state.free_transfers} FT"))
+        metric_card(bar[2], "Bank", f"£{metrics.bank:.1f}m",
+                    caption=f"squad £{metrics.squad_value:.1f}m")
+        metric_card(bar[3], "Scenario xP", f"{metrics.scenario_xp:.1f}",
+                    caption=f"baseline {metrics.baseline_xp:.1f}")
+        metric_card(bar[4], "Δ xP", f"{metrics.xp_delta:+.1f}",
+                    caption="before the hit")
+        # Net EV is the decision. Everything else on this bar is an input to it.
+        metric_card(bar[5], "Net EV", f"{metrics.net_ev:+.1f}",
+                    caption="Δ xP − hit")
+
+        if metrics.transfers and metrics.net_ev < 0:
+            panel_badge(
+                f"This scenario loses {abs(metrics.net_ev):.1f} points against "
+                f"just rolling the transfer. A -{metrics.hits} hit needs "
+                f"{metrics.hits / max(1, metrics.transfers):.0f}+ xP per "
+                "transfer to break even.", "warn")
+
+        actions = st.columns([1, 1, 1, 2])
+        if actions[0].button("↺ Reset sandbox", width="stretch",
+                             disabled=not state.dirty):
+            st.session_state.pop("sandbox_state", None)
+            st.session_state.pop("sandbox_click", None)
             st.rerun()
-        if not check.ok:
-            panel_badge(check.reason, "warn")
-        if st.button("Reset to stored line-up"):
-            st.session_state.pop("pitch_squad", None)
-            st.rerun()
+
+        if actions[1].button("⚡ Monte Carlo", width="stretch",
+                             help="10,000 runs on the scenario XI"):
+            st.session_state["sandbox_mc"] = _run_monte_carlo(conn, state)
+
+        with actions[2].popover("\U0001F4BE Save", width="stretch"):
+            name = st.text_input("Scenario name",
+                                 value=f"GW{state.gw} {state.formation}")
+            if st.button("Save scenario", width="stretch"):
+                sandbox.save_scenario(conn, state, name)
+                st.success(f"Saved “{name}”.")
+
+        saved = sandbox.list_scenarios(conn, gw=squad_gw, limit=5)
+        if saved:
+            with actions[3].popover(f"\U0001F4C2 {len(saved)} saved",
+                                    width="stretch"):
+                for row in saved:
+                    line = st.columns([3, 1])
+                    line[0].markdown(
+                        f"**{row['name']}** · {row['transfers']} transfers · "
+                        f"net EV {row['net_ev']:+.1f}")
+                    if line[1].button("Load", key=f"load_{row['scenario_id']}"):
+                        base = sandbox.open_sandbox(conn, squad_gw)
+                        st.session_state["sandbox_state"] = (
+                            sandbox.load_scenario(
+                                conn, row["scenario_id"], base))
+                        st.rerun()
+
+        mc = st.session_state.get("sandbox_mc")
+        if mc is not None:
+            st.markdown("##### Monte Carlo — 10,000 runs on this scenario")
+            sim = st.columns(4)
+            metric_card(sim[0], "Mean", f"{mc.mean:.1f}")
+            metric_card(sim[1], "Floor (p10)", f"{mc.floor:.1f}")
+            metric_card(sim[2], "Ceiling (p90)", f"{mc.ceiling:.1f}")
+            metric_card(sim[3], "P(any haul)", f"{mc.p_haul_squad:.0%}")
+            for note in mc.notes:
+                st.caption(note)
+
+        if state.transfers:
+            st.markdown("##### Transfers in this scenario")
+            dataframe(pd.DataFrame([
+                {"Out": t.out_name, "Sold": f"£{t.sold_for:.1f}m",
+                 "In": t.in_name, "Bought": f"£{t.bought_for:.1f}m",
+                 "Net spend": f"£{t.net_spend:+.1f}m"}
+                for t in state.transfers]))
+
         st.caption(
-            "Validated against the same formation rules the auto-sub "
-            "engine uses, so the pitch cannot propose a team FPL would "
-            "reject. Changes are local to this view - set your real "
-            "line-up on the FPL site.")
+            "Nothing here touches your stored squad. The sandbox lives in "
+            "this session until you press Save, and even then it is written "
+            "to its own scenario tables — `my_picks` stays the record of what "
+            "you actually own. Set your real line-up on the FPL site.")
 
 # --- shot maps -------------------------------------------------------------
 with shots_tab, error_boundary("Shot maps", quality=quality):

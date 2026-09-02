@@ -193,6 +193,55 @@ config/sources.yaml        News feeds (editable)
 data/                      SQLite DB (git-ignored, regenerated locally)
 ```
 
+## Transfer sandbox (Squad & News → Pitch & sandbox)
+
+A what-if workspace for the only question that matters before a deadline: *is
+this transfer worth the hit?* The pitch is on the left, transfer targets on the
+right, and the impact bar underneath ends in **Net EV** — the number every other
+figure on the bar is an input to:
+
+```
+Net EV = (scenario xP − baseline xP) − transfer hits
+```
+
+**It never touches your squad.** Sandbox state lives in `st.session_state`;
+`my_picks` is the record of what you actually own and every retrospective is
+scored against it. Pressing **Save** writes to the `scenario` / `scenario_pick`
+tables (schema v6) and nothing else — no ingest, projection or calibration code
+path reads them, so a saved what-if can never be mistaken for a real squad.
+`tests/test_sandbox.py::TestPersistence` asserts the row counts of every
+baseline table are unchanged by a save.
+
+Things worth knowing before you trust a number on this screen:
+
+* **Chips change the arithmetic, never the rules.** Wildcard and Free Hit zero
+  the hit; Bench Boost scores all 15; Triple Captain pays 3×. A Free Hit XI is
+  still validated as a legal 15 inside budget, so chips are applied when
+  scoring and never as an exemption inside the swap.
+* **The baseline moves with the chip.** Turning on Bench Boost with no transfer
+  made reports **+0.0**, not +20 — the bench has to be counted on both sides of
+  the subtraction or the bar invents free points for pressing a button.
+* **Selling price ≠ list price.** FPL sells at what you paid plus half the
+  profit. Sell prices are frozen when the sandbox opens, so a player bought
+  inside the sandbox cannot be sold back at a profit that does not exist.
+* **Bank is derived and editable.** This app does not ingest `/entry/`, so the
+  bank is inferred from the £100m budget and your squad's sell value. Correct
+  it from the FPL site if it disagrees — a bank reading £0.0m when you hold
+  £1.5m would refuse transfers you can actually afford.
+* **Legality is delegated, not reimplemented.** `strategy/validator.py` checks
+  the proposed 15 (budget, 3-per-club, position quota). That module
+  deliberately shares no code with the solver so it can catch the solver being
+  wrong; a third copy of the rules in the sandbox would defeat the same purpose.
+* A single transfer is forced to be like-for-like — the 2/5/5/3 quota is exact,
+  so a MID→DEF swap would leave 4 and 6.
+
+**Node density is a toggle, not a default.** The pitch defaults to name + xP +
+fixture pill + armband. "Detailed" adds price and role badges. Fifteen nodes
+carrying six fields each is ~90 elements and reads as noise — price and roles
+matter when *choosing* a transfer, which happens in the right-hand panel. Every
+value hidden at clean density is in the hover *and* the selected-player panel,
+so the toggle never gates a number.
+
 ## Charts: shot map conventions
 
 `fpl_assistant/ui/charts.py` holds decisions that look like arbitrary constants
@@ -230,6 +279,13 @@ Chart changes should be **looked at**, not reasoned about. `kaleido` is in
 ```python
 fig.write_image("check.png", width=780, height=520)   # then open it
 ```
+
+`tests/test_pitch_render.py` automates the same idea for the tactical pitch: it
+rasterises every legal formation at 1400px and 700px and asserts on geometry
+that only exists once something has been laid out — node collisions in a back
+five, furniture escaping the canvas, and the click mapping that turns a Plotly
+(curve, point) back into a player. It found the bench fixture pills rendering
+off the bottom edge, which is invisible in the figure spec.
 
 ## Keeping data fresh
 
